@@ -1,65 +1,103 @@
-import Image from "next/image";
+import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div
+      className="min-h-screen bg-wedding-beige text-wedding-brown font-sans"
+      dir="rtl"
+    >
+      {/* Hero Section */}
+      <section className="relative pt-32 pb-20 px-6 text-center border-b border-wedding-sand/30">
+        <div className="max-w-4xl mx-auto">
+          <h1 className="text-6xl md:text-7xl font-serif font-bold text-wedding-dark mb-8 tracking-tight">
+            החתונה שלכם. <br />
+            <span className="italic opacity-80 text-wedding-brown">
+              פשוטה. חכמה. אלגנטית.
+            </span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+          <p className="text-xl md:text-2xl text-stone-600 mb-12 leading-relaxed max-w-2xl mx-auto font-light">
+            אנחנו יודעים שארגון חתונה יכול להיות כאוס. יצרנו עבורכם את הכלים
+            המתקדמים ביותר לניהול מוזמנים, תקציב ואלכוהול – הכל במקום אחד,
+            בסטייל שמתאים ליום המיוחד שלכם.
+          </p>
+          <div className="flex justify-center gap-6">
+            <Link
+              href="/guests"
+              className="bg-wedding-dark border-2 border-wedding-dark text-wedding-beige px-10 py-4 rounded-full font-bold hover:bg-stone-800 hover:border-stone-800 hover:text-white transition-all shadow-xl scale-110"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+              התחילו עכשיו
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Features Grid */}
+      <section className="py-24 px-6 max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+          {/* Feature 1 */}
+          <div className="group p-8 rounded-3xl bg-white/40 border border-wedding-sand hover:bg-white/80 transition-all duration-500">
+            <div className="text-4xl mb-6 group-hover:scale-110 transition-transform inline-block">
+              📋
+            </div>
+            <h3 className="text-2xl font-bold text-wedding-dark mb-4">
+              ניהול מוזמנים חכם
+            </h3>
+            <p className="text-stone-500 leading-relaxed font-light">
+              ייבוא מהיר מאקסל, מעקב אחרי אישורי הגעה וחלוקה לצדדים בצורה
+              ויזואלית ונוחה. שום אורח לא יישכח מאחור.
+            </p>
+          </div>
+
+          {/* Feature 2 */}
+          <div className="group p-8 rounded-3xl bg-white/40 border border-wedding-sand hover:bg-white/80 transition-all duration-500">
+            <div className="text-4xl mb-6 group-hover:scale-110 transition-transform inline-block">
+              🍾
+            </div>
+            <h3 className="text-2xl font-bold text-wedding-dark mb-4">
+              מחשבון אלכוהול
+            </h3>
+            <p className="text-stone-500 leading-relaxed font-light">
+              מערכת מבוססת נתונים שתחשב לכם בדיוק כמה בקבוקים לקנות לפי הרכב
+              האורחים שלכם. חוסכים כסף ומונעים חוסרים בבר.
+            </p>
+          </div>
+
+          {/* Feature 3 */}
+          <div className="group p-8 rounded-3xl bg-white/40 border border-wedding-sand hover:bg-white/80 transition-all duration-500">
+            <div className="text-4xl mb-6 group-hover:scale-110 transition-transform inline-block">
+              💰
+            </div>
+            <h3 className="text-2xl font-bold text-wedding-dark mb-4">
+              בקרת תקציב
+            </h3>
+            <p className="text-stone-500 leading-relaxed font-light">
+              ניהול הוצאות מול ספקים בזמן אמת. דעו בכל רגע איפה אתם עומדים ומנעו
+              חריגות לא מתוכננות בתקציב.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Quote Section */}
+      <section className="bg-wedding-dark py-20 px-6 text-center text-wedding-beige overflow-hidden relative">
+        <div className="max-w-3xl mx-auto relative z-10">
+          <p className="text-3xl font-serif italic mb-6">
+            "הדרך הכי טובה לחגוג את האהבה שלכם היא להגיע ליום החתונה בראש שקט."
+          </p>
+          <p className="font-bold uppercase tracking-widest text-sm opacity-60">
+            Wedding AI Team
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        {/* קישוט רקע קטן */}
+        <div className="absolute -bottom-10 -right-10 text-[200px] opacity-5 select-none pointer-events-none">
+          🤍
         </div>
-      </main>
+      </section>
+
+      {/* Footer */}
+      <footer className="py-10 text-center text-stone-400 text-sm font-light">
+        © 2026 Wedding AI - מיוצר באהבה עבור סיוון ותומר
+      </footer>
     </div>
   );
 }
