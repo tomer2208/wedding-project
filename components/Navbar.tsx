@@ -2,11 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
+// 1. ייבוא ההוק שקורא את הכתובת
+import { usePathname } from "next/navigation";
 
 export const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
 
-  // סדר התפריט עודכן: דאשבורד נמצא עכשיו בסוף הרשימה
+  // 2. קריאת הכתובת הנוכחית (URL)
+  const pathname = usePathname();
+
   const menuItems = [
     { name: "דף הבית", href: "/" },
     { name: "ניהול מוזמנים", href: "/guests" },
@@ -15,6 +19,11 @@ export const Navbar = () => {
     { name: "מחשבון אלכוהול", href: "/Alcohol" },
     { name: "תמונת מצב", href: "/dashboard" },
   ];
+
+  // 3. תנאי העצירה המגן: אם הכתובת מתחילה ב-rsvp (כולל תת-נתיבים אם יהיו בעתיד), אל תציג כלום!
+  if (pathname.startsWith("/rsvp") || pathname === "/login") {
+    return null;
+  }
 
   return (
     <>

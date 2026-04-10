@@ -22,4 +22,6 @@ export interface Guest {
   ageGroup: "Adults" | "YoungAdults" | "Kids";
 
   status: "Invited" | "Confirmed" | "Declined" | "Pending";
+
+  user_id?: string;
 }

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { ExcelImport } from "@/components/ExcelImport";
 import { Guest } from "@/types/guest";
 import { createClient } from "../../utils/supabase/client";
+import { useRouter } from "next/navigation";
 
 const sideMap: Record<string, string> = {
   Bride: "צד כלה",
@@ -44,9 +45,12 @@ const relationshipMap: Record<string, string> = {
 };
 
 export default function GuestsPage() {
+  const router = useRouter();
+  const supabase = createClient();
+
   const [guests, setGuests] = useState<Guest[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
-  const supabase = createClient();
+  const [userId, setUserId] = useState<string | null>(null); // שומר את מזהה הזוג המחובר
 
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [manualGuest, setManualGuest] = useState<Partial<Guest>>({
@@ -62,19 +66,56 @@ export default function GuestsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<Guest>>({});
 
+  // בדיקת התחברות ומשיכת הנתונים הספציפיים לזוג
   useEffect(() => {
-    const fetchGuests = async () => {
-      const { data, error } = await supabase.from("guests").select("*");
+    const checkAuthAndFetch = async () => {
+      // 1. בודק אם יש סשן (האם מישהו מחובר)
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      // אם אין משתמש, זורק אותו לעמוד ההתחברות
+      if (!session) {
+        router.push("/login");
+        return;
+      }
+
+      // 2. שומר את ה-ID של המשתמש הנוכחי
+      const currentUserId = session.user.id;
+      setUserId(currentUserId);
+
+      // 3. מושך את האורחים ששייכים *רק* למשתמש הזה
+      const { data, error } = await supabase
+        .from("guests")
+        .select("*")
+        .eq("user_id", currentUserId);
+
       if (error) console.error("Error fetching guests:", error);
       else if (data) setGuests(data as Guest[]);
+
       setIsLoaded(true);
     };
-    fetchGuests();
-  }, [supabase]);
+
+    checkAuthAndFetch();
+  }, [supabase, router]);
+
+  // פונקציית התנתקות מהמערכת
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
 
   const handleImportGuests = async (importedGuests: Guest[]) => {
-    const { error } = await supabase.from("guests").insert(importedGuests);
-    if (!error) setGuests((prev) => [...prev, ...importedGuests]);
+    if (!userId) return;
+
+    // הזרקת ה-user_id לכל האורחים שמגיעים מהאקסל
+    const guestsWithUser = importedGuests.map((g) => ({
+      ...g,
+      user_id: userId,
+    }));
+
+    const { error } = await supabase.from("guests").insert(guestsWithUser);
+    if (!error) setGuests((prev) => [...prev, ...guestsWithUser]);
     else alert("הייתה שגיאה בשמירת האורחים מהאקסל");
   };
 
@@ -87,7 +128,7 @@ export default function GuestsPage() {
 
   const handleSaveManualGuest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualGuest.name) return;
+    if (!manualGuest.name || !userId) return;
 
     const newGuest: Guest = {
       id: Math.random().toString(36).substr(2, 9),
@@ -98,6 +139,7 @@ export default function GuestsPage() {
       relationship: manualGuest.relationship as Guest["relationship"],
       ageGroup: manualGuest.ageGroup as Guest["ageGroup"],
       status: manualGuest.status as Guest["status"],
+      user_id: userId, // חשוב מאוד: שיוך האורח לזוג המחובר!
     };
 
     const { error } = await supabase.from("guests").insert([newGuest]);
@@ -113,6 +155,8 @@ export default function GuestsPage() {
         ageGroup: "Adults",
         status: "Pending",
       });
+    } else {
+      alert("שגיאה ביצירת האורח: " + error.message);
     }
   };
 
@@ -128,12 +172,10 @@ export default function GuestsPage() {
     setGuests((prev) =>
       prev.map((g) => (g.id === id ? { ...g, status: newStatus } : g)),
     );
-
     const { error } = await supabase
       .from("guests")
       .update({ status: newStatus })
       .eq("id", id);
-
     if (error) {
       console.error("Error updating status:", error);
       alert("שגיאה בעדכון הסטטוס בענן");
@@ -156,8 +198,17 @@ export default function GuestsPage() {
   };
 
   const handleDeleteAll = async () => {
-    if (window.confirm("זהירות! פעולה זו תמחק את הכל. האם אתה בטוח?")) {
-      const { error } = await supabase.from("guests").delete().neq("id", "0");
+    if (!userId) return;
+    if (
+      window.confirm(
+        "זהירות! פעולה זו תמחק את כל האורחים שלכם. האם אתם בטוחים?",
+      )
+    ) {
+      // מוחק רק את האורחים של המשתמש הספציפי
+      const { error } = await supabase
+        .from("guests")
+        .delete()
+        .eq("user_id", userId);
       if (!error) setGuests([]);
     }
   };
@@ -168,13 +219,9 @@ export default function GuestsPage() {
       return;
     }
 
-    // מנקה את מספר הטלפון מתווים מיותרים
     const cleanPhone = guest.phone.replace(/\D/g, "");
-
-    // הלינק האמיתי כולל https:// כדי שיהיה לחיץ בוואטסאפ!
     const rsvpLink = `https://wedding-project-omega-flame.vercel.app/rsvp`;
 
-    // ניסוח ההודעה
     const message = `היי ${guest.name} ✨
 מה קורה? אנחנו מתרגשים מאוד להזמין אתכם לחתונה שלנו שתתקיים ב-2.6.26! 🥂
 
@@ -183,7 +230,6 @@ ${rsvpLink}
 
 אוהבים, סיוון ותומר ❤️`;
 
-    // פתיחת חלון וואטסאפ עם ההודעה המקודדת
     window.open(
       `https://wa.me/972${cleanPhone.substring(1)}?text=${encodeURIComponent(message)}`,
       "_blank",
@@ -200,16 +246,22 @@ ${rsvpLink}
   return (
     <div className="max-w-6xl mx-auto p-6 pt-24 space-y-10" dir="rtl">
       {/* כותרת וסטטיסטיקה */}
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-stone-50 p-6 rounded-2xl border border-stone-200 shadow-sm">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-stone-50 p-6 rounded-2xl border border-stone-200 shadow-sm relative">
+        {/* כפתור התנתקות */}
+        <button
+          onClick={handleLogout}
+          className="absolute top-4 left-4 text-xs font-bold text-stone-500 hover:text-red-500 transition-colors bg-white px-3 py-1.5 rounded-lg border border-stone-200 shadow-sm"
+        >
+          התנתק 🚪
+        </button>
+
         <div>
           <h1 className="text-3xl font-bold text-wedding-dark">
-            ניהול מוזמנים (מחובר לענן ☁️)
+            ניהול מוזמנים
           </h1>
-          <p className="text-stone-500 mt-1">
-            העלו, ערכו ונהלו את רשימת האורחים שלכם
-          </p>
+          <p className="text-stone-500 mt-1">האזור האישי שלכם לניהול האירוע</p>
         </div>
-        <div className="flex gap-8">
+        <div className="flex gap-8 mt-4 md:mt-0">
           <div className="text-center">
             <span className="block text-4xl font-black text-wedding-brown">
               {totalGuests}
@@ -254,7 +306,7 @@ ${rsvpLink}
           </div>
         </div>
 
-        {/* טופס הוספה ידנית מעודכן עם קרבה וקבוצת גיל */}
+        {/* טופס הוספה ידנית */}
         {isAddingManual && (
           <form
             onSubmit={handleSaveManualGuest}
@@ -327,7 +379,6 @@ ${rsvpLink}
                   ))}
                 </select>
               </div>
-              {/* --- שדה קרבה חסר --- */}
               <div>
                 <label className="block text-sm font-bold text-stone-700 mb-1">
                   קרבה
@@ -349,7 +400,6 @@ ${rsvpLink}
                   ))}
                 </select>
               </div>
-              {/* --- שדה קבוצת גיל חסר --- */}
               <div>
                 <label className="block text-sm font-bold text-stone-700 mb-1">
                   קבוצת גיל
@@ -404,7 +454,7 @@ ${rsvpLink}
           </form>
         )}
 
-        {/* טבלת האורחים עם סטטוס אינטראקטיבי */}
+        {/* טבלת האורחים */}
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-right">
@@ -425,7 +475,7 @@ ${rsvpLink}
                     className={`transition-colors ${editingId === guest.id ? "bg-wedding-sand/10" : "hover:bg-stone-50/50"}`}
                   >
                     {editingId === guest.id ? (
-                      /* מצב עריכה מלא */
+                      /* מצב עריכה */
                       <>
                         <td className="p-3">
                           <input
@@ -454,7 +504,6 @@ ${rsvpLink}
                           />
                         </td>
                         <td className="p-3 space-y-1">
-                          {/* הוספתי שדה קרבה לעריכה */}
                           <select
                             value={editFormData.relationship}
                             onChange={(e) =>
@@ -490,7 +539,6 @@ ${rsvpLink}
                           </select>
                         </td>
                         <td className="p-3">
-                          {/* הוספתי קבוצת גיל לעריכה */}
                           <select
                             value={editFormData.ageGroup}
                             onChange={(e) =>
@@ -529,7 +577,7 @@ ${rsvpLink}
                         </td>
                       </>
                     ) : (
-                      /* מצב תצוגה רגיל עם סטטוס משתנה */
+                      /* מצב תצוגה רגיל */
                       <>
                         <td className="p-4">
                           <div className="font-bold text-stone-800">
@@ -560,7 +608,6 @@ ${rsvpLink}
                           )}
                         </td>
                         <td className="p-4">
-                          {/* ה-Select החדש לעדכון מהיר */}
                           <select
                             value={guest.status}
                             onChange={(e) =>
