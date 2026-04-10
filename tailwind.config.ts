@@ -2,18 +2,17 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   content: [
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {
       colors: {
-        wedding: {
-          beige: "#FAF9F6", // בז' בהיר ויוקרתי לרקע
-          sand: "#E5E1DA", // בז' עמוק יותר לאלמנטים
-          brown: "#5F4B32", // חום אלגנטי לטקסט
-          dark: "#3D3021", // חום כהה מאוד לכפתורים
-        },
+        "wedding-beige": "#FDFBF7", // רקע בז' שמנת בהיר
+        "wedding-sand": "#E8E1D5", // צבע חול לגבולות וקווים
+        "wedding-brown": "#8C7A6B", // חום עדין לטקסט רגיל
+        "wedding-dark": "#4A3F35", // חום כהה לכותרות וכפתורים
       },
     },
   },

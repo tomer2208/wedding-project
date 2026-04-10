@@ -1,26 +1,29 @@
 @import "tailwindcss";
 
 :root {
-  --background: #faf9f6;
-  --foreground: #3d3021;
+  /* הפקודה הזו מכריחה את הדפדפן להתעלם ממצב הלילה של המחשב שלך! */
+  color-scheme: light !important;
+
+  --background: #fdfbf7;
+  --foreground: #4a3f35;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* פלטת החתונה שלנו */
+  --color-wedding-beige: #fdfbf7;
+  --color-wedding-sand: #e8e1d5;
+  --color-wedding-brown: #8c7a6b;
+  --color-wedding-dark: #4a3f35;
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--background) !important;
+  color: var(--foreground) !important;
+  direction: rtl;
 }
