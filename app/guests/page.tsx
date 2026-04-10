@@ -10,46 +10,26 @@ const sideMap: Record<string, string> = {
   Groom: "צד חתן",
   Joint: "משותף",
 };
+
 const statusMap: Record<string, { label: string; color: string }> = {
-  Pending: { label: "מחכה לאישור", color: "bg-yellow-100 text-yellow-800" },
-  Confirmed: { label: "אישר/ה הגעה", color: "bg-green-100 text-green-800" },
-  Declined: { label: "סירב/ה", color: "bg-red-100 text-red-800" },
+  Pending: {
+    label: "מחכה לאישור",
+    color: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  },
+  Confirmed: {
+    label: "אישר/ה הגעה",
+    color: "bg-green-100 text-green-800 border-green-200",
+  },
+  Declined: {
+    label: "סירב/ה",
+    color: "bg-red-100 text-red-800 border-red-200",
+  },
 };
+
 const ageGroupMap: Record<string, string> = {
   Adults: "מבוגרים",
   YoungAdults: "צעירים (אבירים)",
   Kids: "ילדים",
-};
-// פונקציה ליצירת קישור וואטסאפ עם הודעה מובנית
-const sendWhatsAppInvitation = (guest: Guest) => {
-  if (!guest.phone) {
-    alert("לא הוזן מספר טלפון לאורח זה.");
-    return;
-  }
-
-  // מנקה את מספר הטלפון מתווים מיותרים
-  const cleanPhone = guest.phone.replace(/\D/g, "");
-
-  // כאן תכניסו את הקישור האמיתי שלכם אחרי שתעלו ל-Vercel
-  // בינתיים שמתי פלייסהולדר
-  const rsvpLink = `https://sivan-and-tomer.vercel.app/rsvp`;
-
-  const message = `היי ${guest.name} ✨
-מה קורה? אנחנו מתרגשים מאוד להזמין אתכם לחתונה שלנו שתתקיים ב-2.6.26! 🥂
-
-נשמח מאוד אם תוכלו לאשר הגעה בקישור הבא כדי שנוכל להיערך בהתאם:
-${rsvpLink}
-
-אוהבים, סיוון ותומר ❤️`;
-
-  // מקודד את ההודעה לפורמט של URL
-  const encodedMessage = encodeURIComponent(message);
-
-  // פותח את הוואטסאפ
-  window.open(
-    `https://wa.me/972${cleanPhone.substring(1)}?text=${encodedMessage}`,
-    "_blank",
-  );
 };
 
 const relationshipMap: Record<string, string> = {
@@ -66,7 +46,7 @@ const relationshipMap: Record<string, string> = {
 export default function GuestsPage() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
-  const supabase = createClient(); // חיבור ל-Supabase
+  const supabase = createClient();
 
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [manualGuest, setManualGuest] = useState<Partial<Guest>>({
@@ -76,49 +56,35 @@ export default function GuestsPage() {
     side: "Joint",
     relationship: "Other",
     ageGroup: "Adults",
-    status: "Confirmed",
+    status: "Pending",
   });
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<Guest>>({});
 
-  // 1. קריאת הנתונים מ-Supabase בעליית העמוד
   useEffect(() => {
     const fetchGuests = async () => {
       const { data, error } = await supabase.from("guests").select("*");
-
-      if (error) {
-        console.error("Error fetching guests:", error);
-      } else if (data) {
-        setGuests(data as Guest[]);
-      }
+      if (error) console.error("Error fetching guests:", error);
+      else if (data) setGuests(data as Guest[]);
       setIsLoaded(true);
     };
-
     fetchGuests();
   }, [supabase]);
 
-  // 2. העלאת אורחים מאקסל ל-Supabase
   const handleImportGuests = async (importedGuests: Guest[]) => {
     const { error } = await supabase.from("guests").insert(importedGuests);
-    if (!error) {
-      setGuests((prev) => [...prev, ...importedGuests]);
-    } else {
-      alert("הייתה שגיאה בשמירת האורחים מהאקסל");
-    }
+    if (!error) setGuests((prev) => [...prev, ...importedGuests]);
+    else alert("הייתה שגיאה בשמירת האורחים מהאקסל");
   };
 
-  // 3. מחיקת אורח מ-Supabase
   const handleDeleteGuest = async (id: string) => {
     if (window.confirm("האם אתה בטוח שברצונך למחוק אורח זה?")) {
       const { error } = await supabase.from("guests").delete().eq("id", id);
-      if (!error) {
-        setGuests((prev) => prev.filter((g) => g.id !== id));
-      }
+      if (!error) setGuests((prev) => prev.filter((g) => g.id !== id));
     }
   };
 
-  // 4. הוספת אורח ידנית ל-Supabase
   const handleSaveManualGuest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualGuest.name) return;
@@ -135,7 +101,6 @@ export default function GuestsPage() {
     };
 
     const { error } = await supabase.from("guests").insert([newGuest]);
-
     if (!error) {
       setGuests((prev) => [newGuest, ...prev]);
       setIsAddingManual(false);
@@ -146,15 +111,33 @@ export default function GuestsPage() {
         side: "Joint",
         relationship: "Other",
         ageGroup: "Adults",
-        status: "Confirmed",
+        status: "Pending",
       });
     }
   };
 
-  // 5. שמירת עריכה ל-Supabase
   const handleStartEdit = (guest: Guest) => {
     setEditingId(guest.id);
     setEditFormData({ ...guest });
+  };
+
+  const handleQuickStatusUpdate = async (
+    id: string,
+    newStatus: Guest["status"],
+  ) => {
+    setGuests((prev) =>
+      prev.map((g) => (g.id === id ? { ...g, status: newStatus } : g)),
+    );
+
+    const { error } = await supabase
+      .from("guests")
+      .update({ status: newStatus })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error updating status:", error);
+      alert("שגיאה בעדכון הסטטוס בענן");
+    }
   };
 
   const handleSaveEdit = async (id: string) => {
@@ -162,7 +145,6 @@ export default function GuestsPage() {
       .from("guests")
       .update(editFormData)
       .eq("id", id);
-
     if (!error) {
       setGuests((prev) =>
         prev.map((g) =>
@@ -173,18 +155,39 @@ export default function GuestsPage() {
     }
   };
 
-  // 6. מחיקת כל הרשימה ב-Supabase
   const handleDeleteAll = async () => {
-    if (
-      window.confirm(
-        "זהירות! פעולה זו תמחק את כל המוזמנים לצמיתות. האם אתה בטוח?",
-      )
-    ) {
-      const { error } = await supabase.from("guests").delete().neq("id", "0"); // מוחק הכל
-      if (!error) {
-        setGuests([]);
-      }
+    if (window.confirm("זהירות! פעולה זו תמחק את הכל. האם אתה בטוח?")) {
+      const { error } = await supabase.from("guests").delete().neq("id", "0");
+      if (!error) setGuests([]);
     }
+  };
+
+  const sendWhatsAppInvitation = (guest: Guest) => {
+    if (!guest.phone) {
+      alert("לא הוזן מספר טלפון לאורח זה.");
+      return;
+    }
+
+    // מנקה את מספר הטלפון מתווים מיותרים
+    const cleanPhone = guest.phone.replace(/\D/g, "");
+
+    // הלינק האמיתי כולל https:// כדי שיהיה לחיץ בוואטסאפ!
+    const rsvpLink = `https://wedding-project-omega-flame.vercel.app/rsvp`;
+
+    // ניסוח ההודעה
+    const message = `היי ${guest.name} ✨
+מה קורה? אנחנו מתרגשים מאוד להזמין אתכם לחתונה שלנו שתתקיים ב-2.6.26! 🥂
+
+נשמח מאוד אם תוכלו לאשר הגעה בקישור הבא כדי שנוכל להיערך בהתאם:
+${rsvpLink}
+
+אוהבים, סיוון ותומר ❤️`;
+
+    // פתיחת חלון וואטסאפ עם ההודעה המקודדת
+    window.open(
+      `https://wa.me/972${cleanPhone.substring(1)}?text=${encodeURIComponent(message)}`,
+      "_blank",
+    );
   };
 
   const totalGuests = guests.reduce((sum, g) => sum + g.expectedGuests, 0);
@@ -196,7 +199,7 @@ export default function GuestsPage() {
 
   return (
     <div className="max-w-6xl mx-auto p-6 pt-24 space-y-10" dir="rtl">
-      {/* כותרת וסיכום נתונים מהענן */}
+      {/* כותרת וסטטיסטיקה */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-stone-50 p-6 rounded-2xl border border-stone-200 shadow-sm">
         <div>
           <h1 className="text-3xl font-bold text-wedding-dark">
@@ -224,38 +227,34 @@ export default function GuestsPage() {
         </div>
       </div>
 
-      {/* ייבוא אקסל */}
       <section>
         <ExcelImport onImport={handleImportGuests} />
       </section>
 
-      {/* רשימת האורחים */}
       <section className="border-t border-stone-200 pt-8">
         <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
           <h2 className="text-2xl font-bold text-wedding-dark">
-            רשימת האורחים ({guests.length} קבוצות)
+            רשימת האורחים ({guests.length})
           </h2>
           <div className="flex gap-3">
             {guests.length > 0 && (
               <button
                 onClick={handleDeleteAll}
-                className="px-5 py-2.5 border-2 border-red-200 text-red-500 font-bold rounded-xl hover:bg-red-50 transition-all flex items-center gap-2"
+                className="px-5 py-2.5 border-2 border-red-200 text-red-500 font-bold rounded-xl hover:bg-red-50 transition-all"
               >
-                <span>🗑️ מחק הכל</span>
+                🗑️ מחק הכל
               </button>
             )}
             <button
               onClick={() => setIsAddingManual(!isAddingManual)}
-              className="px-5 py-2.5 bg-wedding-dark text-wedding-beige font-bold rounded-xl hover:bg-stone-700 transition-all flex items-center gap-2 shadow-sm"
+              className="px-5 py-2.5 bg-wedding-dark text-wedding-beige font-bold rounded-xl hover:bg-stone-700 transition-all"
             >
-              <span>
-                {isAddingManual ? "✕ סגור טופס" : "➕ הוספת אורח ידנית"}
-              </span>
+              {isAddingManual ? "✕ סגור" : "➕ הוספת אורח ידנית"}
             </button>
           </div>
         </div>
 
-        {/* טופס הוספה ידנית */}
+        {/* טופס הוספה ידנית מעודכן עם קרבה וקבוצת גיל */}
         {isAddingManual && (
           <form
             onSubmit={handleSaveManualGuest}
@@ -273,8 +272,7 @@ export default function GuestsPage() {
                   onChange={(e) =>
                     setManualGuest({ ...manualGuest, name: e.target.value })
                   }
-                  className="w-full border-stone-300 rounded-lg p-2.5 border outline-none focus:border-wedding-brown"
-                  placeholder="למשל: משפחת כהן"
+                  className="w-full border-stone-300 rounded-lg p-2.5 border outline-none"
                 />
               </div>
               <div className="col-span-2">
@@ -287,8 +285,7 @@ export default function GuestsPage() {
                   onChange={(e) =>
                     setManualGuest({ ...manualGuest, phone: e.target.value })
                   }
-                  className="w-full border-stone-300 rounded-lg p-2.5 border outline-none focus:border-wedding-brown"
-                  placeholder="05X-XXXXXXX"
+                  className="w-full border-stone-300 rounded-lg p-2.5 border outline-none"
                 />
               </div>
               <div>
@@ -306,7 +303,7 @@ export default function GuestsPage() {
                       expectedGuests: Number(e.target.value),
                     })
                   }
-                  className="w-full border-stone-300 rounded-lg p-2.5 border outline-none focus:border-wedding-brown"
+                  className="w-full border-stone-300 rounded-lg p-2.5 border outline-none"
                 />
               </div>
               <div>
@@ -321,7 +318,7 @@ export default function GuestsPage() {
                       side: e.target.value as Guest["side"],
                     })
                   }
-                  className="w-full border-stone-300 rounded-lg p-2.5 border bg-white outline-none focus:border-wedding-brown"
+                  className="w-full border-stone-300 rounded-lg p-2.5 border bg-white"
                 >
                   {Object.entries(sideMap).map(([key, label]) => (
                     <option key={key} value={key}>
@@ -330,6 +327,7 @@ export default function GuestsPage() {
                   ))}
                 </select>
               </div>
+              {/* --- שדה קרבה חסר --- */}
               <div>
                 <label className="block text-sm font-bold text-stone-700 mb-1">
                   קרבה
@@ -351,6 +349,7 @@ export default function GuestsPage() {
                   ))}
                 </select>
               </div>
+              {/* --- שדה קבוצת גיל חסר --- */}
               <div>
                 <label className="block text-sm font-bold text-stone-700 mb-1">
                   קבוצת גיל
@@ -372,23 +371,44 @@ export default function GuestsPage() {
                   ))}
                 </select>
               </div>
-              <div className="col-span-4 md:col-span-2 flex items-end">
+              <div>
+                <label className="block text-sm font-bold text-stone-700 mb-1">
+                  סטטוס הגעה
+                </label>
+                <select
+                  value={manualGuest.status}
+                  onChange={(e) =>
+                    setManualGuest({
+                      ...manualGuest,
+                      status: e.target.value as Guest["status"],
+                    })
+                  }
+                  className="w-full border-stone-300 rounded-lg p-2.5 border bg-white font-bold"
+                >
+                  {Object.entries(statusMap).map(([key, { label }]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-4 md:col-span-1 flex items-end">
                 <button
                   type="submit"
-                  className="w-full py-2.5 bg-wedding-brown text-white font-bold rounded-xl hover:bg-stone-600 transition-all shadow-sm"
+                  className="w-full py-2.5 bg-wedding-brown text-white font-bold rounded-xl hover:bg-stone-600 shadow-sm"
                 >
-                  💾 שמור אורח חדש
+                  💾 שמור
                 </button>
               </div>
             </div>
           </form>
         )}
 
-        {/* טבלת האורחים */}
+        {/* טבלת האורחים עם סטטוס אינטראקטיבי */}
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-right">
-              <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 font-medium">
+              <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 font-medium text-sm">
                 <tr>
                   <th className="p-4">שם האורח/ת</th>
                   <th className="p-4 w-20">כמות</th>
@@ -399,99 +419,100 @@ export default function GuestsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {guests.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-10 text-center text-stone-400">
-                      עדיין אין מוזמנים ברשימה. הוסיפו אורח ראשון למסד הנתונים!
-                    </td>
-                  </tr>
-                ) : (
-                  guests.map((guest) => (
-                    <tr
-                      key={guest.id}
-                      className={`transition-colors ${editingId === guest.id ? "bg-wedding-sand/10" : "hover:bg-stone-50/50"}`}
-                    >
-                      {editingId === guest.id ? (
-                        /* מצב עריכה */
-                        <>
-                          <td className="p-3">
-                            <input
-                              type="text"
-                              value={editFormData.name}
-                              onChange={(e) =>
-                                setEditFormData({
-                                  ...editFormData,
-                                  name: e.target.value,
-                                })
-                              }
-                              className="w-full p-1 border rounded"
-                            />
-                            <input
-                              type="text"
-                              placeholder="טלפון"
-                              value={editFormData.phone}
-                              onChange={(e) =>
-                                setEditFormData({
-                                  ...editFormData,
-                                  phone: e.target.value,
-                                })
-                              }
-                              className="w-full p-1 border rounded mt-1 text-xs"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <input
-                              type="number"
-                              min="1"
-                              value={editFormData.expectedGuests}
-                              onChange={(e) =>
-                                setEditFormData({
-                                  ...editFormData,
-                                  expectedGuests: Number(e.target.value),
-                                })
-                              }
-                              className="w-full p-1 border rounded"
-                            />
-                          </td>
-                          <td className="p-3 space-y-1">
-                            <select
-                              value={editFormData.relationship}
-                              onChange={(e) =>
-                                setEditFormData({
-                                  ...editFormData,
-                                  relationship: e.target
-                                    .value as Guest["relationship"],
-                                })
-                              }
-                              className="w-full p-1 text-sm border rounded"
-                            >
-                              {Object.entries(relationshipMap).map(([k, v]) => (
-                                <option key={k} value={k}>
-                                  {v}
-                                </option>
-                              ))}
-                            </select>
-                            <select
-                              value={editFormData.side}
-                              onChange={(e) =>
-                                setEditFormData({
-                                  ...editFormData,
-                                  side: e.target.value as Guest["side"],
-                                })
-                              }
-                              className="w-full p-1 text-sm border rounded"
-                            >
-                              {Object.entries(sideMap).map(([k, v]) => (
-                                <option key={k} value={k}>
-                                  {v}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td
-                            className="p-3 text-center space-x-2 space-x-reverse"
-                            colSpan={3}
+                {guests.map((guest) => (
+                  <tr
+                    key={guest.id}
+                    className={`transition-colors ${editingId === guest.id ? "bg-wedding-sand/10" : "hover:bg-stone-50/50"}`}
+                  >
+                    {editingId === guest.id ? (
+                      /* מצב עריכה מלא */
+                      <>
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={editFormData.name}
+                            onChange={(e) =>
+                              setEditFormData({
+                                ...editFormData,
+                                name: e.target.value,
+                              })
+                            }
+                            className="w-full p-1 border rounded"
+                          />
+                        </td>
+                        <td className="p-3">
+                          <input
+                            type="number"
+                            value={editFormData.expectedGuests}
+                            onChange={(e) =>
+                              setEditFormData({
+                                ...editFormData,
+                                expectedGuests: Number(e.target.value),
+                              })
+                            }
+                            className="w-full p-1 border rounded"
+                          />
+                        </td>
+                        <td className="p-3 space-y-1">
+                          {/* הוספתי שדה קרבה לעריכה */}
+                          <select
+                            value={editFormData.relationship}
+                            onChange={(e) =>
+                              setEditFormData({
+                                ...editFormData,
+                                relationship: e.target
+                                  .value as Guest["relationship"],
+                              })
+                            }
+                            className="w-full p-1 text-xs border rounded"
                           >
+                            {Object.entries(relationshipMap).map(([k, v]) => (
+                              <option key={k} value={k}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={editFormData.side}
+                            onChange={(e) =>
+                              setEditFormData({
+                                ...editFormData,
+                                side: e.target.value as Guest["side"],
+                              })
+                            }
+                            className="w-full p-1 border rounded text-xs"
+                          >
+                            {Object.entries(sideMap).map(([k, v]) => (
+                              <option key={k} value={k}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="p-3">
+                          {/* הוספתי קבוצת גיל לעריכה */}
+                          <select
+                            value={editFormData.ageGroup}
+                            onChange={(e) =>
+                              setEditFormData({
+                                ...editFormData,
+                                ageGroup: e.target.value as Guest["ageGroup"],
+                              })
+                            }
+                            className="w-full p-1 text-xs border rounded"
+                          >
+                            {Object.entries(ageGroupMap).map(([k, v]) => (
+                              <option key={k} value={k}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td
+                          className="p-3 text-center space-x-2 space-x-reverse"
+                          colSpan={2}
+                        >
+                          <div className="flex gap-2 justify-center">
                             <button
                               onClick={() => handleSaveEdit(guest.id)}
                               className="px-3 py-1 bg-green-500 text-white text-xs font-bold rounded shadow-sm hover:bg-green-600"
@@ -504,89 +525,100 @@ export default function GuestsPage() {
                             >
                               בטל
                             </button>
-                          </td>
-                        </>
-                      ) : (
-                        /* מצב תצוגה רגיל */
-                        <>
-                          <td className="p-4">
-                            <div className="font-bold text-stone-800">
-                              {guest.name}
-                            </div>
-                            {guest.phone && (
-                              <div className="text-sm text-stone-500">
-                                {guest.phone}
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-4 font-bold text-lg">
-                            {guest.expectedGuests}
-                          </td>
-                          <td className="p-4 text-stone-600">
-                            {relationshipMap[guest.relationship]} <br />
-                            <span className="text-sm text-stone-400">
-                              {sideMap[guest.side]}
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      /* מצב תצוגה רגיל עם סטטוס משתנה */
+                      <>
+                        <td className="p-4">
+                          <div className="font-bold text-stone-800">
+                            {guest.name}
+                          </div>
+                          <div className="text-xs text-stone-400">
+                            {guest.phone}
+                          </div>
+                        </td>
+                        <td className="p-4 font-bold text-lg">
+                          {guest.expectedGuests}
+                        </td>
+                        <td className="p-4 text-xs text-stone-600">
+                          {relationshipMap[guest.relationship]} <br />
+                          <span className="text-stone-400">
+                            {sideMap[guest.side]}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          {guest.ageGroup === "YoungAdults" ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-wedding-sand/30 text-wedding-brown font-bold text-sm">
+                              🍻 {ageGroupMap[guest.ageGroup]}
                             </span>
-                          </td>
-                          <td className="p-4">
-                            {guest.ageGroup === "YoungAdults" ? (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-wedding-sand/30 text-wedding-brown font-bold text-sm">
-                                🍻 {ageGroupMap[guest.ageGroup]}
-                              </span>
-                            ) : (
-                              <span className="text-stone-600">
-                                {ageGroupMap[guest.ageGroup]}
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-4">
-                            <span
-                              className={`px-3 py-1 rounded-full text-xs font-bold ${statusMap[guest.status].color}`}
-                            >
-                              {statusMap[guest.status].label}
+                          ) : (
+                            <span className="text-stone-600 text-sm">
+                              {ageGroupMap[guest.ageGroup]}
                             </span>
-                          </td>
-                          <td className="p-4 text-center">
-                            <div className="flex justify-center gap-4">
-                              {/* כפתור וואטסאפ */}
-                              <button
-                                onClick={() => sendWhatsAppInvitation(guest)}
-                                className="text-green-500 hover:text-green-600 transition-colors p-1"
-                                title="שלח הזמנה בוואטסאפ"
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  width="20"
-                                  height="20"
-                                  fill="currentColor"
-                                  viewBox="0 0 16 16"
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {/* ה-Select החדש לעדכון מהיר */}
+                          <select
+                            value={guest.status}
+                            onChange={(e) =>
+                              handleQuickStatusUpdate(
+                                guest.id,
+                                e.target.value as Guest["status"],
+                              )
+                            }
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border cursor-pointer outline-none transition-all shadow-sm ${statusMap[guest.status].color}`}
+                          >
+                            {Object.entries(statusMap).map(
+                              ([key, { label }]) => (
+                                <option
+                                  key={key}
+                                  value={key}
+                                  className="bg-white text-stone-800"
                                 >
-                                  <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z" />
-                                </svg>
-                              </button>
-                              {/* כפתור עריכה */}
-                              <button
-                                onClick={() => handleStartEdit(guest)}
-                                className="text-stone-400 hover:text-wedding-brown transition-colors p-1"
-                                title="ערוך אורח"
+                                  {label}
+                                </option>
+                              ),
+                            )}
+                          </select>
+                        </td>
+                        <td className="p-4 text-center">
+                          <div className="flex justify-center gap-4">
+                            <button
+                              onClick={() => sendWhatsAppInvitation(guest)}
+                              className="text-green-500 hover:scale-110 transition-transform"
+                              title="שלח וואטסאפ"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                fill="currentColor"
+                                viewBox="0 0 16 16"
                               >
-                                ✏️
-                              </button>
-                              {/* כפתור מחיקה */}
-                              <button
-                                onClick={() => handleDeleteGuest(guest.id)}
-                                className="text-stone-400 hover:text-red-500 transition-colors p-1"
-                                title="מחק אורח"
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))
-                )}
+                                <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleStartEdit(guest)}
+                              className="text-stone-400 hover:text-wedding-brown transition-colors"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              onClick={() => handleDeleteGuest(guest.id)}
+                              className="text-stone-400 hover:text-red-500 transition-colors"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
