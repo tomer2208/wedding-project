@@ -3,11 +3,13 @@
 import React, { useState, useEffect } from "react";
 import { Guest } from "@/types/guest";
 import { createClient } from "@/utils/supabase/client"; // הצינור החדש שלנו
+import {
+  findGuestByPhoneOnServer,
+  updateRsvpOnServer,
+} from "@/app/actions/rsvp";
 
 export default function RsvpPage() {
   const [mounted, setMounted] = useState(false);
-  const supabase = createClient();
-
   const [step, setStep] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchError, setSearchError] = useState("");
@@ -22,52 +24,43 @@ export default function RsvpPage() {
 
   if (!mounted) return null;
 
-  // --- חיפוש אורח ב-Supabase לפי טלפון ---
+  // --- חיפוש אורח (קריאה לשרת) ---
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError("");
 
-    const cleanQuery = searchQuery.replace(/\D/g, "");
-    if (!cleanQuery) {
+    if (!searchQuery) {
       setSearchError("אנא הזינו מספר טלפון תקין.");
       return;
     }
 
-    // שאילתה ישירות למסד הנתונים
-    const { data, error } = await supabase
-      .from("guests")
-      .select("*")
-      .filter("phone", "ilike", `%${cleanQuery}%`) // חיפוש גמיש בטלפון
-      .single(); // אנחנו מצפים לאורח אחד ספציפי
+    const response = await findGuestByPhoneOnServer(searchQuery);
 
-    if (error || !data) {
+    if (!response.success || !response.guest) {
       setSearchError(
         "לא מצאנו אורח עם מספר הטלפון הזה. ודאו שהזנתם את המספר שנרשם בהזמנה.",
       );
     } else {
-      const guest = data as Guest;
-      setFoundGuest(guest);
-      setActualGuests(guest.expectedGuests || 1);
+      setFoundGuest(response.guest);
+      setActualGuests(response.guest.expectedGuests || 1);
       setStep(2);
     }
   };
 
-  // --- עדכון התשובה ב-Supabase ---
+  // --- עדכון התשובה (קריאה לשרת) ---
   const handleSubmitRsvp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isAttending === null || !foundGuest) return;
 
     setIsSubmitting(true);
 
-    const { error } = await supabase
-      .from("guests")
-      .update({
-        status: isAttending ? "Confirmed" : "Declined",
-        expectedGuests: isAttending ? actualGuests : 0,
-      })
-      .eq("id", foundGuest.id);
+    const response = await updateRsvpOnServer(
+      foundGuest.id,
+      isAttending,
+      actualGuests,
+    );
 
-    if (!error) {
+    if (response.success) {
       setStep(3);
     } else {
       alert("הייתה תקלה בעדכון. אנא נסו שוב מאוחר יותר.");
