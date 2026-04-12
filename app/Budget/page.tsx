@@ -1,422 +1,452 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/utils/supabase/client";
+import { Vendor } from "@/types/vendor"; // ודא שיצרת את הקובץ הזה לפי ההסבר הקודם
 
-// טיפוס נתונים מורחב עבור שורת תקציב וספק
-interface BudgetItem {
-  id: string;
-  category: string;
-  vendorName: string;
-  contactName: string;
-  phone: string;
-  planned: number;
-  actual: number;
-  downpayment: number;
-}
+const categories = [
+  "אולם וגן אירועים",
+  "קייטרינג ואוכל",
+  "בר ואלכוהול",
+  "צלם סטילס",
+  "צלם וידאו",
+  "דיג'יי ולהקה",
+  "שמלת כלה",
+  "איפור ושיער",
+  "חליפת חתן",
+  "טבעות תכשיטים",
+  "עיצוב ואווירה",
+  "אחר",
+];
 
 export default function BudgetPage() {
-  const [mounted, setMounted] = useState(false);
-  const [items, setItems] = useState<BudgetItem[]>([]);
-  const [isFormOpen, setIsFormOpen] = useState(false);
+  const router = useRouter();
+  const supabase = createClient();
 
-  const [newItem, setNewItem] = useState({
-    category: "",
-    vendorName: "",
-    contactName: "",
-    phone: "",
-    planned: 0,
-    actual: 0,
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // מצב הוספת ספק חדש
+  const [isAdding, setIsAdding] = useState(false);
+  const [newVendor, setNewVendor] = useState<Partial<Vendor>>({
+    category: "אולם וגן אירועים",
+    name: "",
+    planned_cost: 0,
+    actual_cost: 0,
     downpayment: 0,
   });
 
-  // טעינה מהזיכרון
+  // מצב עריכה
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editFormData, setEditFormData] = useState<Partial<Vendor>>({});
+
+  // 1. טעינת הנתונים בעליית העמוד
   useEffect(() => {
-    setMounted(true);
-    const saved = localStorage.getItem("wedding_budget");
-    if (saved) setItems(JSON.parse(saved));
-  }, []);
+    const checkAuthAndFetch = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-  // שמירה לזיכרון בכל שינוי
-  useEffect(() => {
-    if (mounted) {
-      localStorage.setItem("wedding_budget", JSON.stringify(items));
-    }
-  }, [items, mounted]);
+      if (!session) {
+        router.push("/login");
+        return;
+      }
 
-  // --- חישובים לוגיים ---
-  const totals = useMemo(() => {
-    const planned = items.reduce((acc, item) => acc + item.planned, 0);
-    const actual = items.reduce((acc, item) => acc + item.actual, 0);
-    const paid = items.reduce((acc, item) => acc + (item.downpayment || 0), 0);
+      setUserId(session.user.id);
 
-    return {
-      planned,
-      actual,
-      paid,
-      remainingToPay: actual - paid, // יתרה לתשלום לספקים
-      saved: planned - actual, // חיסכון מול התכנון
+      const { data, error } = await supabase
+        .from("vendors")
+        .select("*")
+        .eq("user_id", session.user.id)
+        .order("created_at", { ascending: true }); // מסדר לפי סדר ההוספה
+
+      if (error) console.error("Error fetching vendors:", error);
+      else if (data) setVendors(data as Vendor[]);
+
+      setIsLoaded(true);
     };
-  }, [items]);
 
-  // --- Handlers ---
-  const addItem = (e: React.FormEvent) => {
+    checkAuthAndFetch();
+  }, [router, supabase]);
+
+  // 2. שמירת ספק חדש
+  const handleAddVendor = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newItem.category) return;
+    if (!userId || !newVendor.name) return;
 
-    const item: BudgetItem = {
-      id: Math.random().toString(36).substr(2, 9),
-      category: newItem.category,
-      vendorName: newItem.vendorName,
-      contactName: newItem.contactName,
-      phone: newItem.phone,
-      planned: newItem.planned,
-      actual: newItem.actual || 0,
-      downpayment: newItem.downpayment || 0,
+    const vendorToInsert = {
+      ...newVendor,
+      user_id: userId,
     };
 
-    setItems([...items, item]);
-    setNewItem({
-      category: "",
-      vendorName: "",
-      contactName: "",
-      phone: "",
-      planned: 0,
-      actual: 0,
-      downpayment: 0,
-    });
-    setIsFormOpen(false);
+    const { data, error } = await supabase
+      .from("vendors")
+      .insert([vendorToInsert])
+      .select()
+      .single();
+
+    if (!error && data) {
+      setVendors((prev) => [...prev, data as Vendor]);
+      setIsAdding(false);
+      setNewVendor({
+        category: "אולם וגן אירועים",
+        name: "",
+        planned_cost: 0,
+        actual_cost: 0,
+        downpayment: 0,
+      });
+    } else {
+      alert("שגיאה בשמירת הספק: " + error?.message);
+    }
   };
 
-  // פונקציה גנרית לעדכון שדות בטבלה (כמו מחיר סופי ומקדמה)
-  const updateField = (id: string, field: keyof BudgetItem, value: any) => {
-    setItems(
-      items.map((item) =>
-        item.id === id ? { ...item, [field]: value } : item,
-      ),
-    );
+  // 3. מחיקת ספק
+  const handleDeleteVendor = async (id: string) => {
+    if (window.confirm("האם למחוק ספק זה?")) {
+      const { error } = await supabase.from("vendors").delete().eq("id", id);
+      if (!error) setVendors((prev) => prev.filter((v) => v.id !== id));
+    }
   };
 
-  const deleteItem = (id: string) => {
-    setItems(items.filter((item) => item.id !== id));
+  // 4. עריכת ספק (התחלה)
+  const handleStartEdit = (vendor: Vendor) => {
+    setEditingId(vendor.id);
+    setEditFormData({ ...vendor });
   };
 
-  if (!mounted) return null; // מניעת שגיאת Hydration
+  // 5. שמירת עריכה
+  const handleSaveEdit = async (id: string) => {
+    const { error } = await supabase
+      .from("vendors")
+      .update(editFormData)
+      .eq("id", id);
+
+    if (!error) {
+      setVendors((prev) =>
+        prev.map((v) =>
+          v.id === id ? ({ ...v, ...editFormData } as Vendor) : v,
+        ),
+      );
+      setEditingId(null);
+    } else {
+      alert("שגיאה בעדכון הספק");
+    }
+  };
+
+  // --- חישובי סטטיסטיקות ---
+  const totalPlanned = vendors.reduce(
+    (sum, v) => sum + (Number(v.planned_cost) || 0),
+    0,
+  );
+  const totalActual = vendors.reduce(
+    (sum, v) => sum + (Number(v.actual_cost) || 0),
+    0,
+  );
+  const totalPaid = vendors.reduce(
+    (sum, v) => sum + (Number(v.downpayment) || 0),
+    0,
+  );
+  const remainingToPay = totalActual - totalPaid; // כמה נשאר לשלם בפועל
+
+  if (!isLoaded) return null;
 
   return (
-    <div
-      className="min-h-screen bg-wedding-beige p-8 text-wedding-brown"
-      dir="rtl"
-    >
-      <div className="max-w-7xl mx-auto pt-16">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 border-b border-wedding-sand pb-6 gap-6">
-          <div>
-            <h1 className="text-4xl font-serif font-bold text-wedding-dark">
-              ניהול תקציב וספקים
-            </h1>
-            <p className="text-stone-500 mt-2">
-              מתכננים חכם, עוקבים אחרי תשלומים
-            </p>
+    <div className="max-w-6xl mx-auto p-6 pt-24 space-y-10" dir="rtl">
+      {/* כותרת וסיכום כלכלי */}
+      <div className="bg-stone-50 p-8 rounded-3xl border border-stone-200 shadow-sm relative overflow-hidden">
+        <h1 className="text-3xl font-bold text-wedding-dark mb-6">
+          ניהול תקציב וספקים (מחובר לענן ☁️)
+        </h1>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 relative z-10">
+          <div className="bg-white p-4 rounded-2xl border border-stone-100 shadow-sm text-center">
+            <span className="text-sm font-bold text-stone-500 block mb-1">
+              תכנון מקורי
+            </span>
+            <span className="text-2xl md:text-3xl font-black text-stone-400">
+              ₪{totalPlanned.toLocaleString()}
+            </span>
           </div>
+          <div className="bg-white p-4 rounded-2xl border border-stone-100 shadow-sm text-center">
+            <span className="text-sm font-bold text-stone-500 block mb-1">
+              עלות בפועל
+            </span>
+            <span className="text-2xl md:text-3xl font-black text-wedding-dark">
+              ₪{totalActual.toLocaleString()}
+            </span>
+          </div>
+          <div className="bg-white p-4 rounded-2xl border border-stone-100 shadow-sm text-center">
+            <span className="text-sm font-bold text-stone-500 block mb-1">
+              שולם (מקדמות)
+            </span>
+            <span className="text-2xl md:text-3xl font-black text-green-600">
+              ₪{totalPaid.toLocaleString()}
+            </span>
+          </div>
+          <div className="bg-wedding-dark p-4 rounded-2xl shadow-md text-center">
+            <span className="text-sm font-bold text-wedding-beige/70 block mb-1">
+              נותר לשלם
+            </span>
+            <span className="text-2xl md:text-3xl font-black text-wedding-sand">
+              ₪{remainingToPay.toLocaleString()}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <section className="border-t border-stone-200 pt-8">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-wedding-dark">
+            רשימת הספקים ({vendors.length})
+          </h2>
           <button
-            onClick={() => setIsFormOpen(!isFormOpen)}
-            className="bg-wedding-dark border-2 border-wedding-dark text-wedding-beige px-8 py-3 rounded-full font-bold hover:bg-stone-800 hover:border-stone-800 hover:text-white transition-all shadow-sm active:scale-95 whitespace-nowrap"
+            onClick={() => setIsAdding(!isAdding)}
+            className="px-5 py-2.5 bg-wedding-dark text-wedding-beige font-bold rounded-xl hover:bg-stone-700 transition-all flex items-center gap-2"
           >
-            {isFormOpen ? "ביטול הוספה" : "➕ הוסף התחייבות/ספק"}
+            {isAdding ? "✕ סגור טופס" : "➕ הוסף ספק חדש"}
           </button>
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-          <div className="bg-white/60 backdrop-blur-sm p-6 rounded-3xl border border-wedding-sand shadow-sm">
-            <p className="text-xs text-stone-500 font-black uppercase mb-1">
-              תקציב מתוכנן
-            </p>
-            <p className="text-2xl font-bold text-wedding-dark">
-              ₪{totals.planned.toLocaleString()}
-            </p>
-          </div>
-          <div className="bg-white/60 backdrop-blur-sm p-6 rounded-3xl border border-wedding-sand shadow-sm">
-            <p className="text-xs text-stone-500 font-black uppercase mb-1">
-              סה"כ חוזים (בפועל)
-            </p>
-            <p className="text-2xl font-bold text-wedding-brown">
-              ₪{totals.actual.toLocaleString()}
-            </p>
-          </div>
-          <div className="bg-green-50/80 backdrop-blur-sm p-6 rounded-3xl border border-green-200 shadow-sm">
-            <p className="text-xs text-green-700 font-black uppercase mb-1">
-              שולם מקדמות
-            </p>
-            <p className="text-2xl font-bold text-green-700">
-              ₪{totals.paid.toLocaleString()}
-            </p>
-          </div>
-          <div className="bg-wedding-dark p-6 rounded-3xl shadow-sm text-wedding-beige">
-            <p className="text-xs font-black uppercase mb-1 opacity-80">
-              נותר לשלם לספקים
-            </p>
-            <p className="text-2xl font-black">
-              ₪{totals.remainingToPay.toLocaleString()}
-            </p>
-          </div>
-        </div>
-
-        {/* Add Form */}
-        {isFormOpen && (
+        {/* טופס הוספת ספק */}
+        {isAdding && (
           <form
-            onSubmit={addItem}
-            className="bg-white p-8 rounded-3xl border border-wedding-sand shadow-sm mb-10 animate-in fade-in slide-in-from-top-4 duration-300"
+            onSubmit={handleAddVendor}
+            className="bg-stone-50 p-6 rounded-2xl border border-stone-200 mb-8 animate-in fade-in slide-in-from-top-4"
           >
-            <h3 className="font-bold text-lg mb-6 border-b border-wedding-sand/40 pb-2">
-              פרטי ספק והוצאה
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-black uppercase opacity-60">
-                  קטגוריה *
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-bold text-stone-700 mb-1">
+                  קטגוריה
+                </label>
+                <select
+                  value={newVendor.category}
+                  onChange={(e) =>
+                    setNewVendor({ ...newVendor, category: e.target.value })
+                  }
+                  className="w-full p-2.5 rounded-xl border border-stone-300 outline-none focus:border-wedding-brown bg-white"
+                >
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-bold text-stone-700 mb-1">
+                  שם הספק *
                 </label>
                 <input
-                  type="text"
-                  value={newItem.category}
-                  onChange={(e) =>
-                    setNewItem({ ...newItem, category: e.target.value })
-                  }
-                  className="bg-wedding-beige/30 border border-wedding-sand p-3 rounded-xl outline-none focus:border-wedding-brown"
-                  placeholder="למשל: צלם, אולם..."
                   required
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-black uppercase opacity-60">
-                  תקציב מתוכנן
-                </label>
-                <input
-                  type="number"
-                  value={newItem.planned || ""}
-                  onChange={(e) =>
-                    setNewItem({
-                      ...newItem,
-                      planned: parseInt(e.target.value) || 0,
-                    })
-                  }
-                  className="bg-wedding-beige/30 border border-wedding-sand p-3 rounded-xl outline-none focus:border-wedding-brown font-bold"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-black uppercase opacity-60">
-                  שם הספק / עסק
-                </label>
-                <input
                   type="text"
-                  value={newItem.vendorName}
+                  placeholder="למשל: חיים הצלם"
+                  value={newVendor.name}
                   onChange={(e) =>
-                    setNewItem({ ...newItem, vendorName: e.target.value })
+                    setNewVendor({ ...newVendor, name: e.target.value })
                   }
-                  className="bg-wedding-beige/30 border border-wedding-sand p-3 rounded-xl outline-none focus:border-wedding-brown"
-                  placeholder="הכנס שם ספק"
+                  className="w-full p-2.5 rounded-xl border border-stone-300 outline-none focus:border-wedding-brown"
                 />
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-black uppercase opacity-60">
-                  איש קשר
-                </label>
-                <input
-                  type="text"
-                  value={newItem.contactName}
-                  onChange={(e) =>
-                    setNewItem({ ...newItem, contactName: e.target.value })
-                  }
-                  className="bg-wedding-beige/30 border border-wedding-sand p-3 rounded-xl outline-none focus:border-wedding-brown"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-black uppercase opacity-60">
-                  טלפון
-                </label>
-                <input
-                  type="tel"
-                  value={newItem.phone}
-                  onChange={(e) =>
-                    setNewItem({ ...newItem, phone: e.target.value })
-                  }
-                  className="bg-wedding-beige/30 border border-wedding-sand p-3 rounded-xl outline-none focus:border-wedding-brown text-left"
-                  dir="ltr"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-black uppercase opacity-60">
-                  סה"כ נסגר בחוזה (בפועל)
+              <div>
+                <label className="block text-sm font-bold text-stone-700 mb-1">
+                  הערכה (₪)
                 </label>
                 <input
                   type="number"
-                  value={newItem.actual || ""}
+                  min="0"
+                  value={newVendor.planned_cost || ""}
                   onChange={(e) =>
-                    setNewItem({
-                      ...newItem,
-                      actual: parseInt(e.target.value) || 0,
+                    setNewVendor({
+                      ...newVendor,
+                      planned_cost: Number(e.target.value),
                     })
                   }
-                  className="bg-wedding-beige/30 border border-wedding-sand p-3 rounded-xl outline-none focus:border-wedding-brown font-bold"
+                  className="w-full p-2.5 rounded-xl border border-stone-300 outline-none focus:border-wedding-brown"
                 />
               </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-black uppercase text-green-700">
-                  מקדמה ששולמה
-                </label>
-                <input
-                  type="number"
-                  value={newItem.downpayment || ""}
-                  onChange={(e) =>
-                    setNewItem({
-                      ...newItem,
-                      downpayment: parseInt(e.target.value) || 0,
-                    })
-                  }
-                  className="bg-green-50 border border-green-200 p-3 rounded-xl outline-none text-green-700 font-bold"
-                />
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  className="w-full py-2.5 bg-wedding-brown text-white font-bold rounded-xl hover:bg-stone-600 transition-all"
+                >
+                  💾 שמור
+                </button>
               </div>
-            </div>
-
-            <div className="mt-8 flex justify-end">
-              <button
-                type="submit"
-                className="bg-wedding-dark text-wedding-beige px-12 py-3 rounded-full font-bold hover:bg-stone-800 transition-all text-lg shadow-md active:scale-95"
-              >
-                שמור התחייבות
-              </button>
             </div>
           </form>
         )}
 
-        {/* Expenses & Vendors Table */}
-        <div className="bg-white border border-wedding-sand rounded-3xl shadow-sm overflow-hidden">
+        {/* טבלת ספקים */}
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-right border-collapse min-w-[900px]">
-              <thead>
-                <tr className="bg-wedding-sand/20 border-b border-wedding-sand text-wedding-dark font-black text-xs uppercase tracking-wide">
-                  <th className="p-5 w-48">קטגוריה</th>
-                  <th className="p-5 w-56">פרטי ספק</th>
-                  <th className="p-5 text-center">מתוכנן</th>
-                  <th className="p-5 text-center bg-wedding-sand/5">
-                    סה"כ בחוזה
-                  </th>
-                  <th className="p-5 text-center text-green-700">מקדמה</th>
-                  <th className="p-5 text-center text-red-600">יתרה לתשלום</th>
-                  <th className="p-5"></th>
+            <table className="w-full text-right">
+              <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 font-medium text-sm">
+                <tr>
+                  <th className="p-4 w-1/4">קטגוריה וספק</th>
+                  <th className="p-4">תכנון מקורי</th>
+                  <th className="p-4">סגירה בפועל</th>
+                  <th className="p-4">שולם (מקדמה)</th>
+                  <th className="p-4">נותר לתשלום</th>
+                  <th className="p-4 text-center">פעולות</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-wedding-sand/20">
-                {items.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="hover:bg-wedding-beige/10 transition-colors"
-                  >
-                    <td className="p-5">
-                      <span className="bg-wedding-beige/50 text-wedding-dark text-xs px-3 py-1.5 rounded-lg font-bold">
-                        {item.category}
-                      </span>
-                    </td>
-
-                    <td className="p-5">
-                      <p className="font-bold text-wedding-dark text-sm">
-                        {item.vendorName || "טרם נבחר ספק"}
-                      </p>
-                      <div className="flex flex-col gap-0.5 mt-1 text-xs text-stone-500">
-                        {item.contactName && <span>👤 {item.contactName}</span>}
-                        {item.phone && (
-                          <a
-                            href={`tel:${item.phone}`}
-                            className="text-blue-600 hover:text-blue-800 hover:underline font-mono"
-                            dir="ltr"
-                          >
-                            📞 {item.phone}
-                          </a>
-                        )}
-                      </div>
-                    </td>
-
-                    <td className="p-5 text-center font-medium text-stone-500">
-                      ₪{item.planned.toLocaleString()}
-                    </td>
-
-                    {/* עריכת מחיר סופי */}
-                    <td className="p-5 bg-wedding-sand/5 border-x border-wedding-sand/10">
-                      <div className="flex justify-center items-center gap-1">
-                        <span className="text-xs text-stone-400">₪</span>
-                        <input
-                          type="number"
-                          value={item.actual || ""}
-                          placeholder="0"
-                          onChange={(e) =>
-                            updateField(
-                              item.id,
-                              "actual",
-                              parseInt(e.target.value) || 0,
-                            )
-                          }
-                          className="w-24 bg-white border border-wedding-sand p-2 rounded-lg text-center font-bold focus:border-wedding-brown outline-none"
-                        />
-                      </div>
-                    </td>
-
-                    {/* עריכת מקדמה */}
-                    <td className="p-5">
-                      <div className="flex justify-center items-center gap-1">
-                        <span className="text-xs text-stone-400">₪</span>
-                        <input
-                          type="number"
-                          value={item.downpayment || ""}
-                          placeholder="0"
-                          onChange={(e) =>
-                            updateField(
-                              item.id,
-                              "downpayment",
-                              parseInt(e.target.value) || 0,
-                            )
-                          }
-                          className="w-24 bg-green-50 border border-green-200 text-green-700 p-2 rounded-lg text-center font-bold focus:border-green-400 outline-none"
-                        />
-                      </div>
-                    </td>
-
-                    <td className="p-5 text-center font-black text-wedding-dark text-lg">
-                      ₪
-                      {(
-                        (item.actual || 0) - (item.downpayment || 0)
-                      ).toLocaleString()}
-                    </td>
-
-                    <td className="p-5 text-left">
-                      <button
-                        onClick={() => deleteItem(item.id)}
-                        className="text-stone-300 hover:text-red-500 transition-colors p-2 rounded-full hover:bg-red-50"
-                      >
-                        🗑️
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-
-                {items.length === 0 && (
+              <tbody className="divide-y divide-stone-100">
+                {vendors.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={7}
-                      className="p-16 text-center text-stone-400 italic text-lg"
-                    >
-                      עדיין לא הזנתם הוצאות. לחצו על "הוסף התחייבות" כדי להתחיל!
+                    <td colSpan={6} className="p-10 text-center text-stone-400">
+                      אין ספקים ברשימה. לחצו על "הוסף ספק חדש" כדי להתחיל.
                     </td>
                   </tr>
+                ) : (
+                  vendors.map((vendor) => (
+                    <tr
+                      key={vendor.id}
+                      className={`transition-colors ${editingId === vendor.id ? "bg-wedding-sand/10" : "hover:bg-stone-50/50"}`}
+                    >
+                      {editingId === vendor.id ? (
+                        /* מצב עריכה */
+                        <>
+                          <td className="p-3 space-y-2">
+                            <select
+                              value={editFormData.category}
+                              onChange={(e) =>
+                                setEditFormData({
+                                  ...editFormData,
+                                  category: e.target.value,
+                                })
+                              }
+                              className="w-full p-1 border rounded text-sm bg-white"
+                            >
+                              {categories.map((cat) => (
+                                <option key={cat} value={cat}>
+                                  {cat}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={editFormData.name}
+                              onChange={(e) =>
+                                setEditFormData({
+                                  ...editFormData,
+                                  name: e.target.value,
+                                })
+                              }
+                              className="w-full p-1 border rounded text-sm font-bold"
+                            />
+                          </td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              value={editFormData.planned_cost}
+                              onChange={(e) =>
+                                setEditFormData({
+                                  ...editFormData,
+                                  planned_cost: Number(e.target.value),
+                                })
+                              }
+                              className="w-full p-1 border rounded text-sm"
+                            />
+                          </td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              value={editFormData.actual_cost}
+                              onChange={(e) =>
+                                setEditFormData({
+                                  ...editFormData,
+                                  actual_cost: Number(e.target.value),
+                                })
+                              }
+                              className="w-full p-1 border rounded text-sm bg-green-50 focus:bg-white"
+                            />
+                          </td>
+                          <td className="p-3" colSpan={2}>
+                            <input
+                              type="number"
+                              value={editFormData.downpayment}
+                              onChange={(e) =>
+                                setEditFormData({
+                                  ...editFormData,
+                                  downpayment: Number(e.target.value),
+                                })
+                              }
+                              className="w-full p-1 border rounded text-sm"
+                              placeholder="כמה שולם?"
+                            />
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex gap-2 justify-center">
+                              <button
+                                onClick={() => handleSaveEdit(vendor.id)}
+                                className="px-3 py-1 bg-green-500 text-white text-xs font-bold rounded shadow-sm"
+                              >
+                                שמור
+                              </button>
+                              <button
+                                onClick={() => setEditingId(null)}
+                                className="px-3 py-1 bg-stone-300 text-stone-700 text-xs font-bold rounded shadow-sm"
+                              >
+                                בטל
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        /* מצב תצוגה */
+                        <>
+                          <td className="p-4">
+                            <div className="text-xs text-stone-400 font-bold mb-0.5">
+                              {vendor.category}
+                            </div>
+                            <div className="font-bold text-stone-800">
+                              {vendor.name}
+                            </div>
+                          </td>
+                          <td className="p-4 text-stone-500">
+                            ₪{vendor.planned_cost?.toLocaleString() || 0}
+                          </td>
+                          <td className="p-4 font-bold text-wedding-dark">
+                            ₪{vendor.actual_cost?.toLocaleString() || 0}
+                          </td>
+                          <td className="p-4 text-green-600 font-bold">
+                            ₪{vendor.downpayment?.toLocaleString() || 0}
+                          </td>
+                          <td className="p-4 text-red-500 font-bold">
+                            ₪
+                            {(
+                              (vendor.actual_cost || 0) -
+                              (vendor.downpayment || 0)
+                            ).toLocaleString()}
+                          </td>
+                          <td className="p-4 text-center">
+                            <div className="flex justify-center gap-4">
+                              <button
+                                onClick={() => handleStartEdit(vendor)}
+                                className="text-stone-400 hover:text-wedding-brown transition-colors"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                onClick={() => handleDeleteVendor(vendor.id)}
+                                className="text-stone-400 hover:text-red-500 transition-colors"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

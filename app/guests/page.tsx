@@ -51,6 +51,7 @@ export default function GuestsPage() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [userId, setUserId] = useState<string | null>(null); // שומר את מזהה הזוג המחובר
+  const [profile, setProfile] = useState<any>(null);
 
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [manualGuest, setManualGuest] = useState<Partial<Guest>>({
@@ -84,6 +85,17 @@ export default function GuestsPage() {
       const currentUserId = session.user.id;
       setUserId(currentUserId);
 
+      // משיכת הפרופיל כדי להשתמש בשמות ובתאריך
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", currentUserId)
+        .single();
+
+      if (profileData) {
+        setProfile(profileData);
+      }
+
       // 3. מושך את האורחים ששייכים *רק* למשתמש הזה
       const { data, error } = await supabase
         .from("guests")
@@ -98,12 +110,6 @@ export default function GuestsPage() {
 
     checkAuthAndFetch();
   }, [supabase, router]);
-
-  // פונקציית התנתקות מהמערכת
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
 
   const handleImportGuests = async (importedGuests: Guest[]) => {
     if (!userId) return;
@@ -218,24 +224,35 @@ export default function GuestsPage() {
       alert("לא הוזן מספר טלפון לאורח זה.");
       return;
     }
+    if (!profile || !profile.slug) {
+      alert("אנא הגדירו את פרטי האירוע בעמוד ההגדרות לפני שליחת הודעות.");
+      return;
+    }
 
     const cleanPhone = guest.phone.replace(/\D/g, "");
-    const rsvpLink = `https://wedding-project-omega-flame.vercel.app/rsvp`;
 
+    // הרכבת הלינק עם ה-Slug הספציפי של הזוג
+    const rsvpLink = `https://wedding-project-omega-flame.vercel.app/rsvp/${profile.slug}`;
+
+    // סידור תאריך החתונה לפורמט ישראלי (DD.MM.YY)
+    const formattedDate = profile.wedding_date
+      ? new Date(profile.wedding_date).toLocaleDateString("he-IL")
+      : "בקרוב";
+
+    // ניסוח ההודעה הדינמית
     const message = `היי ${guest.name} ✨
-מה קורה? אנחנו מתרגשים מאוד להזמין אתכם לחתונה שלנו שתתקיים ב-2.6.26! 🥂
+מה קורה? אנחנו מתרגשים מאוד להזמין אתכם לחתונה שלנו שתתקיים ב-${formattedDate}! 🥂
 
 נשמח מאוד אם תוכלו לאשר הגעה בקישור הבא כדי שנוכל להיערך בהתאם:
 ${rsvpLink}
 
-אוהבים, סיוון ותומר ❤️`;
+אוהבים, ${profile.couple_names} ❤️`;
 
     window.open(
       `https://wa.me/972${cleanPhone.substring(1)}?text=${encodeURIComponent(message)}`,
       "_blank",
     );
   };
-
   const totalGuests = guests.reduce((sum, g) => sum + g.expectedGuests, 0);
   const confirmedGuests = guests
     .filter((g) => g.status === "Confirmed")
@@ -247,14 +264,6 @@ ${rsvpLink}
     <div className="max-w-6xl mx-auto p-6 pt-24 space-y-10" dir="rtl">
       {/* כותרת וסטטיסטיקה */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-stone-50 p-6 rounded-2xl border border-stone-200 shadow-sm relative">
-        {/* כפתור התנתקות */}
-        <button
-          onClick={handleLogout}
-          className="absolute top-4 left-4 text-xs font-bold text-stone-500 hover:text-red-500 transition-colors bg-white px-3 py-1.5 rounded-lg border border-stone-200 shadow-sm"
-        >
-          התנתק 🚪
-        </button>
-
         <div>
           <h1 className="text-3xl font-bold text-wedding-dark">
             ניהול מוזמנים

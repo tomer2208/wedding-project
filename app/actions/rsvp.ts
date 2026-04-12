@@ -1,21 +1,37 @@
-"use server"; // מילת הקסם - הקוד הזה רץ רק בשרת, בטוח לחלוטין
+"use server";
 
 import { createClient } from "@supabase/supabase-js";
 import { Guest } from "@/types/guest";
 
-// יצירת חיבור "אדמין" שעוקף את ה-RLS באמצעות המפתח הסודי
+// חיבור מנהל שעוקף את ה-RLS
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!, // המפתח החדש שלנו
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
-// פונקציה למציאת אורח לפי טלפון
-export async function findGuestByPhoneOnServer(phoneQuery: string) {
+// 1. פונקציה חדשה: מציאת הפרופיל לפי הלינק (slug)
+export async function getProfileBySlug(slug: string) {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("*")
+    .eq("slug", slug)
+    .single();
+
+  if (error || !data) return null;
+  return data;
+}
+
+// 2. פונקציה מעודכנת: חיפוש אורח לפי טלפון *וגם* לפי ה-ID של הזוג
+export async function findGuestByPhoneOnServer(
+  phoneQuery: string,
+  userId: string,
+) {
   const cleanPhone = phoneQuery.replace(/\D/g, "");
 
   const { data, error } = await supabaseAdmin
     .from("guests")
     .select("*")
+    .eq("user_id", userId) // חובה! מוודא שמחפשים רק ברשימה של הזוג הספציפי
     .ilike("phone", `%${cleanPhone}%`)
     .single();
 
@@ -26,7 +42,7 @@ export async function findGuestByPhoneOnServer(phoneQuery: string) {
   return { success: true, guest: data as Guest };
 }
 
-// פונקציה לעדכון תשובת האורח
+// 3. עדכון התשובה (נשאר ללא שינוי, כי ה-ID של האורח כבר ייחודי)
 export async function updateRsvpOnServer(
   guestId: string,
   isAttending: boolean,

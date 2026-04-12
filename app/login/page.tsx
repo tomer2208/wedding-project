@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../utils/supabase/client";
 
@@ -13,23 +13,57 @@ export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
 
+  // בדיקה אם מישהו כבר מחובר ונחת בעמוד הזה בטעות
+  useEffect(() => {
+    const checkSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session) {
+        routeUser(session.user.id);
+      }
+    };
+    checkSession();
+  }, []);
+
+  // פונקציית הנתב החכם: בודקת אם יש פרופיל ומחליטה לאן לשלוח
+  const routeUser = async (userId: string) => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", userId)
+      .single();
+
+    // אם אין פרופיל (שגיאה 116) -> זוג חדש
+    if (error && error.code === "PGRST116") {
+      router.push("/settings");
+    } else {
+      // יש פרופיל -> זוג קיים
+      router.push("/dashboard");
+    }
+  };
+
   // פונקציית הרשמה (זוג חדש)
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage({ text: "", type: "" });
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
     });
 
     if (error) {
       setMessage({ text: "אופס, משהו השתבש: " + error.message, type: "error" });
+      setLoading(false);
     } else {
-      setMessage({ text: "הרשמה בוצעה בהצלחה! אפשר להתחבר.", type: "success" });
+      setMessage({ text: "הרשמה בוצעה! מכין את המערכת...", type: "success" });
+      // הרשמה הצליחה - נפעיל את הנתב
+      if (data.session) {
+        await routeUser(data.session.user.id);
+      }
     }
-    setLoading(false);
   };
 
   // פונקציית התחברות (זוג קיים)
@@ -38,18 +72,21 @@ export default function LoginPage() {
     setLoading(true);
     setMessage({ text: "", type: "" });
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
       setMessage({ text: "אימייל או סיסמה שגויים", type: "error" });
+      setLoading(false);
     } else {
-      // התחברות מוצלחת! נעביר אותם לעמוד הניהול
-      router.push("/guests");
+      setMessage({ text: "התחברות מוצלחת! מעביר...", type: "success" });
+      // התחברות הצליחה - נפעיל את הנתב
+      if (data.session) {
+        await routeUser(data.session.user.id);
+      }
     }
-    setLoading(false);
   };
 
   return (
