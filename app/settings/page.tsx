@@ -87,7 +87,7 @@ export default function SettingsPage() {
     } else {
       setMessage({ text: "ההגדרות נשמרו בהצלחה! 🎉", type: "success" });
       // אפשר להחליט להעביר אותם חזרה לדאשבורד או להשאיר כאן
-      setTimeout(() => router.push("/guests"), 2000);
+      setTimeout(() => router.push("/"), 1000); // מעביר לדאשבורד אחרי שנייה
     }
 
     setIsLoading(false);

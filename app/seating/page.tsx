@@ -1,11 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Guest } from "@/types/guest";
 import { optimizeSeating, Table } from "@/utils/seatingAlgorithm";
 import * as XLSX from "xlsx";
+import { createClient } from "@/utils/supabase/client";
 
 export default function SeatingPage() {
+  const router = useRouter();
+  const supabase = createClient();
+
   const [mounted, setMounted] = useState(false);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [results, setResults] = useState<Table[] | null>(null);
@@ -17,22 +22,54 @@ export default function SeatingPage() {
     count20: 2,
   });
 
+  // 1. משיכת הנתונים מהענן כשהעמוד עולה
   useEffect(() => {
-    setMounted(true);
-    const savedGuests = localStorage.getItem("wedding_guests");
-    if (savedGuests) {
-      try {
-        setGuests(JSON.parse(savedGuests));
-      } catch (e) {}
-    }
-  }, []);
+    const fetchGuestsAndCheckAuth = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        router.push("/login");
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", session.user.id)
+        .single();
+
+      if (error && error.code === "PGRST116") {
+        router.push("/settings");
+        return;
+      }
+
+      // משיכת רשימת האורחים של הזוג מהענן
+      const { data: guestsData } = await supabase
+        .from("guests")
+        .select("*")
+        .eq("user_id", session.user.id);
+
+      if (guestsData) {
+        setGuests(guestsData as Guest[]);
+      }
+
+      setMounted(true);
+    };
+
+    fetchGuestsAndCheckAuth();
+  }, [router, supabase]);
 
   const handleOptimize = () => {
     setIsOptimizing(true);
     setResults(null);
 
+    // מסננים החוצה את מי שסירב כדי שהאלגוריתם לא ישבץ אותם בכלל!
+    const guestsToSeat = guests.filter((g) => g.status !== "Declined");
+
     setTimeout(() => {
-      const finalTables = optimizeSeating(guests, tableConfig);
+      const finalTables = optimizeSeating(guestsToSeat, tableConfig);
       setResults(finalTables);
       setIsOptimizing(false);
     }, 500);
@@ -47,23 +84,18 @@ export default function SeatingPage() {
       return;
     }
 
-    // הפעם אנחנו משתמשים במערך דו-ממדי כדי לשלוט בדיוק באיזו שורה נכנס כל נתון
     const exportData: any[][] = [];
 
     results.forEach((table, tableIndex) => {
       const isKnights = table.capacity === 20;
 
-      // 1. שורת הכותרת העליונה של השולחן (מודגשת רעיונית)
       const tableTitle = isKnights
         ? `👑 שולחן ${tableIndex + 1} - אבירים (${table.currentSeats}/${table.capacity} מושבים)`
         : `🍽️ שולחן ${tableIndex + 1} (${table.currentSeats}/${table.capacity} מושבים)`;
 
       exportData.push([tableTitle]);
-
-      // 2. שורת כותרות העמודות של הטבלה הקטנה
       exportData.push(["שם האורח/משפחה", "כמות אנשים", "הערות"]);
 
-      // 3. שורות האורחים של אותו שולחן
       table.guests.forEach((guest) => {
         exportData.push([
           guest.name,
@@ -72,20 +104,13 @@ export default function SeatingPage() {
         ]);
       });
 
-      // 4. שורת רווח ריקה כדי להפריד יפה מהשולחן הבא
       exportData.push([]);
       exportData.push([]);
     });
 
-    // המרה ממערך דו-ממדי לגיליון אקסל
     const worksheet = XLSX.utils.aoa_to_sheet(exportData);
 
-    // סידור רוחב העמודות כך שיתאימו לטבלאות הקטנות
-    worksheet["!cols"] = [
-      { wch: 35 }, // עמודה א' - רחבה מאוד כי היא מכילה גם את כותרת השולחן וגם את השמות
-      { wch: 15 }, // עמודה ב' - כמות אנשים
-      { wch: 15 }, // עמודה ג' - הערות
-    ];
+    worksheet["!cols"] = [{ wch: 35 }, { wch: 15 }, { wch: 15 }];
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(
@@ -94,11 +119,12 @@ export default function SeatingPage() {
       "סידור הושבה למנהל אירוע",
     );
 
-    XLSX.writeFile(workbook, "סידור_הושבה_לפי_שולחנות_סיוון_ותומר.xlsx");
+    XLSX.writeFile(workbook, "סידור_הושבה_לפי_שולחנות.xlsx");
   };
 
   if (!mounted) return null;
 
+  // חישוב רק של האנשים שבאמת רלוונטיים להושבה (לא כולל מי שסירב)
   const totalGuestsToSeat = guests
     .filter((g) => g.status !== "Declined")
     .reduce((acc, g) => acc + g.expectedGuests, 0);
@@ -115,7 +141,10 @@ export default function SeatingPage() {
           </h1>
           <p className="text-stone-500">
             הגדירו את כמות השולחנות באולם, והאלגוריתם ישבץ את{" "}
-            {totalGuestsToSeat} האורחים שלכם בצורה אופטימלית לפי קרבה, גיל וצד.
+            <span className="font-bold text-wedding-dark">
+              {totalGuestsToSeat}
+            </span>{" "}
+            האורחים (מאשרים וממתינים) בצורה אופטימלית.
           </p>
         </div>
 
@@ -201,7 +230,7 @@ export default function SeatingPage() {
 
           {totalGuestsToSeat === 0 && (
             <p className="text-center text-red-500 mt-4 text-sm font-bold">
-              לא נמצאו מוזמנים שאישרו הגעה. יש להוסיף מוזמנים בעמוד הניהול.
+              לא נמצאו מוזמנים רלוונטיים. יש להוסיף מוזמנים בעמוד הניהול.
             </p>
           )}
         </div>
@@ -209,9 +238,22 @@ export default function SeatingPage() {
         {results && (
           <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 border-b border-wedding-sand pb-4 gap-4">
-              <h2 className="text-2xl font-serif font-bold text-wedding-dark">
-                תוצאות השיבוץ ({results.length} שולחנות שובצו)
-              </h2>
+              <div>
+                <h2 className="text-2xl font-serif font-bold text-wedding-dark">
+                  תוצאות השיבוץ ({results.length} שולחנות שובצו)
+                </h2>
+                {/* מקרא צבעים */}
+                <div className="flex gap-4 text-sm font-bold mt-2">
+                  <span className="flex items-center gap-1.5 text-green-700">
+                    <span className="w-3 h-3 rounded-full bg-green-500"></span>{" "}
+                    אישרו הגעה
+                  </span>
+                  <span className="flex items-center gap-1.5 text-yellow-600">
+                    <span className="w-3 h-3 rounded-full bg-yellow-400"></span>{" "}
+                    ממתינים לאישור
+                  </span>
+                </div>
+              </div>
               <button
                 onClick={handleExportSeatingToExcel}
                 className="px-6 py-2.5 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm"
@@ -262,20 +304,26 @@ export default function SeatingPage() {
                     {table.guests.map((guest, idx) => (
                       <div
                         key={idx}
-                        className="flex justify-between items-center text-sm bg-stone-50 p-2 rounded-lg"
+                        // העיצוב המותנה - ירוק למאשרים, צהוב לממתינים
+                        className={`flex justify-between items-center text-sm p-2.5 rounded-lg border-r-4 ${
+                          guest.status === "Confirmed"
+                            ? "bg-green-50/50 border-green-500"
+                            : "bg-yellow-50/50 border-yellow-400"
+                        }`}
                       >
-                        <span className="font-medium text-stone-700">
+                        <span className="font-medium text-stone-800">
                           {guest.name}{" "}
-                          <span className="text-stone-400 text-xs">
+                          <span className="text-stone-500 font-bold text-xs ml-1">
                             ({guest.expectedGuests})
                           </span>
                         </span>
-                        <div className="flex gap-1">
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white border border-stone-200 text-stone-500">
+                        <div className="flex gap-1.5 items-center">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white border border-stone-200 text-stone-500 shadow-sm">
                             {guest.relationship}
                           </span>
                           <span
-                            className={`w-2 h-2 rounded-full mt-1 ${guest.side === "Bride" ? "bg-pink-400" : guest.side === "Groom" ? "bg-blue-400" : "bg-stone-400"}`}
+                            className={`w-2.5 h-2.5 rounded-full ${guest.side === "Bride" ? "bg-pink-400" : guest.side === "Groom" ? "bg-blue-400" : "bg-stone-400"}`}
+                            title={guest.side}
                           ></span>
                         </div>
                       </div>
