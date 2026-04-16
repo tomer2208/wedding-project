@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation"; // הוספנו את useRouter
+import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
 export const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
-  const router = useRouter(); // הפעלת הראוטר לטובת ההתנתקות
+  const router = useRouter();
   const supabase = createClient();
 
   // הסטייט שישמור את שם הזוג
@@ -38,7 +38,7 @@ export const Navbar = () => {
   // הפונקציה שמנתקת את המשתמש
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setIsOpen(false); // סוגר את התפריט אם הוא פתוח
+    setIsOpen(false);
     router.push("/login");
   };
 
@@ -51,8 +51,12 @@ export const Navbar = () => {
     { name: "תמונת מצב", href: "/dashboard" },
   ];
 
-  // מסתיר את התפריט לאורחים ב-RSVP ולעמוד הלוגין
-  if (pathname.startsWith("/rsvp") || pathname === "/login") {
+  // ✅ התיקון הקריטי: שימוש ב-includes כדי לתפוס נתיבים דינמיים כמו /[slug]/rsvp/[id]
+  if (
+    pathname.includes("/rsvp") ||
+    pathname === "/login" ||
+    pathname === "/register"
+  ) {
     return null;
   }
 

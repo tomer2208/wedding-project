@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
+import { createClient } from "@/utils/supabase/client"; // הוספנו את הקליינט כדי למשוך את האורח
 import {
   getProfileBySlug,
   findGuestByPhoneOnServer,
@@ -11,7 +12,8 @@ import { Guest } from "@/types/guest";
 
 export default function DynamicRsvpPage() {
   const params = useParams();
-  const slug = params.slug as string; // קורא את הלינק משורת הכתובת
+  const slug = params.slug as string;
+  const id = params.id as string; // קורא את ה-ID של האורח מהכתובת (אם קיים)
 
   // סטייטים לפרופיל הזוג
   const [profile, setProfile] = useState<any>(null);
@@ -26,23 +28,41 @@ export default function DynamicRsvpPage() {
   const [actualGuests, setActualGuests] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // טעינת פרטי החתונה ברגע שהעמוד עולה
+  // טעינת הנתונים (הפרופיל והאורח) ברגע שהעמוד עולה
   useEffect(() => {
-    const loadProfile = async () => {
-      if (slug) {
-        const data = await getProfileBySlug(slug);
-        setProfile(data);
+    const loadData = async () => {
+      if (!slug) return;
+
+      // 1. טוענים את פרטי האירוע
+      const profileData = await getProfileBySlug(slug);
+      setProfile(profileData);
+
+      // 2. זיהוי אוטומטי! אם יש ID בקישור, מדלגים ישר לשלב 2
+      if (id && profileData) {
+        const supabase = createClient();
+        const { data: guest } = await supabase
+          .from("guests")
+          .select("*")
+          .eq("id", id)
+          .single();
+
+        if (guest) {
+          setFoundGuest(guest);
+          setActualGuests(guest.expectedGuests || 1);
+          setStep(2); // דילוג על חיפוש הטלפון!
+        }
       }
       setIsProfileLoading(false);
     };
-    loadProfile();
-  }, [slug]);
+
+    loadData();
+  }, [slug, id]);
 
   // מסך טעינה ראשוני
   if (isProfileLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-wedding-brown">
-        טוען נתוני אירוע...
+      <div className="min-h-screen flex items-center justify-center text-wedding-brown font-bold text-xl">
+        טוען את ההזמנה שלכם... ✨
       </div>
     );
   }
@@ -67,7 +87,7 @@ export default function DynamicRsvpPage() {
     );
   }
 
-  // --- הפונקציות שלנו (מעודכנות עם profile.id) ---
+  // --- חיפוש ידני (למי שהגיע בלי הקישור האישי) ---
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError("");
@@ -77,8 +97,10 @@ export default function DynamicRsvpPage() {
       return;
     }
 
-    // מעבירים לשרת גם את הטלפון וגם את ה-ID של הזוג כדי שיחפש רק אצלם!
-    const response = await findGuestByPhoneOnServer(searchQuery, profile.id);
+    // ניקוי טלפון לפני השליחה לשרת (מונע באגים של רווחים ומקפים)
+    const cleanPhone = searchQuery.replace(/\D/g, "");
+
+    const response = await findGuestByPhoneOnServer(cleanPhone, profile.id);
 
     if (!response.success || !response.guest) {
       setSearchError("לא מצאנו אורח עם מספר הטלפון הזה ברשימה.");
@@ -113,7 +135,7 @@ export default function DynamicRsvpPage() {
       className="min-h-screen bg-stone-50 flex flex-col items-center p-4 font-sans"
       dir="rtl"
     >
-      {/* כותרת דינמית - מושכת את השמות ממסד הנתונים! */}
+      {/* כותרת דינמית */}
       <div className="text-center mt-12 mb-8 animate-in fade-in slide-in-from-top-8 duration-700">
         <h1 className="text-4xl md:text-5xl font-serif font-bold text-wedding-dark mb-2">
           {profile.couple_names}
@@ -126,6 +148,7 @@ export default function DynamicRsvpPage() {
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-stone-100 overflow-hidden relative">
         <div className="h-2 bg-wedding-brown w-full"></div>
         <div className="p-8">
+          {/* שלב 1: חיפוש (יוצג רק אם האורח הגיע בלי קישור אישי) */}
           {step === 1 && (
             <div className="animate-in fade-in slide-in-from-right-4 duration-500">
               <div className="text-center mb-8">
@@ -160,9 +183,9 @@ export default function DynamicRsvpPage() {
             </div>
           )}
 
+          {/* שלב 2: אישור הגעה */}
           {step === 2 && foundGuest && (
             <div className="animate-in fade-in slide-in-from-right-4 duration-500">
-              {/* המשך קוד שלב 2 מהעמוד המקורי שלך (הכפתורים של בא/לא בא ובחירת כמות) */}
               <div className="text-center mb-8">
                 <h2 className="text-2xl font-bold text-stone-800 mb-2">
                   היי {foundGuest.name}! ✨
@@ -232,6 +255,7 @@ export default function DynamicRsvpPage() {
             </div>
           )}
 
+          {/* שלב 3: סיכום */}
           {step === 3 && (
             <div className="text-center py-8 animate-in fade-in zoom-in duration-500">
               <div className="text-6xl mb-6">{isAttending ? "🎉" : "🤍"}</div>
@@ -240,7 +264,7 @@ export default function DynamicRsvpPage() {
               </h2>
               <p className="text-stone-500 text-lg">
                 {isAttending
-                  ? `התשובה נקלטה בהצלחה. נתראה ב-${new Date(profile.wedding_date).toLocaleDateString("he-IL")}!`
+                  ? `התשובה נקלטה בהצלחה. נתראה ב-2.6!`
                   : "התשובה נקלטה בהצלחה. נשמח לחגוג יחד בשמחות אחרות!"}
               </p>
             </div>
