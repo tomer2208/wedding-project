@@ -4,12 +4,16 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { useHeartbeat } from "@/components/hooks/useHeartbeat"; // ודא שהנתיב תואם לתיקייה שלך
 
 export const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
+
+  // הפעלת מנגנון האבטחה והניתוק האוטומטי
+  useHeartbeat();
 
   // הסטייט שישמור את שם הזוג
   const [coupleNames, setCoupleNames] = useState("הזוג המאושר");
