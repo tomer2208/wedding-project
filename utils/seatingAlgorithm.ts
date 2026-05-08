@@ -1,5 +1,7 @@
-import { Guest } from "@/types/guest";
+// utils/seatingAlgorithm.ts
+import { Guest } from "@/types/guest"; // מוודא שה-Guest מיובא נכון
 
+// 1. הוספנו את המילה export כדי שהעמוד יוכל להשתמש ב-Table
 export interface Table {
   id: string;
   name: string;
@@ -15,38 +17,36 @@ function calculateTableScore(table: Table): number {
   let score = 0;
   const currentCount = table.currentSeats;
 
-  // חוק 0: שולחן ריק זה מצוין (חסכנו)
   if (currentCount === 0) return 0;
 
-  // חוק 1: קנס קטלני על חריגה ממקסימום מקומות
   if (currentCount > table.capacity) {
     return -20000 * (currentCount - table.capacity) - 10000;
   }
 
-  // חוק 2: לוגיקת שולחן אבירים (20 מקומות) - ה-VIP של הצעירים
   if (table.capacity === 20) {
-    // א. העפה אגרסיבית של מי שאינו צעיר
     const nonYoungGuests = table.guests.filter(
       (g) => g.ageGroup !== "YoungAdults",
     );
     if (nonYoungGuests.length > 0) {
       score -= 100000;
     }
-
-    // ב. בונוס משיכה לחבר'ה מהצבא, לימודים ועבודה (דרישה 1)
     table.guests.forEach((g) => {
       if (["Army", "Work", "Friends", "Study"].includes(g.relationship)) {
-        score += 300; // מקבלים תעדוף עליון לשבת באבירים!
+        score += 300;
       }
     });
   }
 
-  // חוק 3: ענישה על בזבוז שולחנות (Bin Packing)
-  score -= 1000; // קנס על עצם פתיחת השולחן
-  const wastedSeats = table.capacity - currentCount;
-  score -= wastedSeats * 50; // קנס על כל כיסא ריק בשולחן פתוח
+  // === חוק 3 המעודכן: איזון תפוסת שולחנות ===
+  score -= 500;
 
-  // חוק 4: חיבורים חברתיים (דרישה 2)
+  if (currentCount < 6) {
+    score -= (6 - currentCount) * 150;
+  } else if (currentCount < table.capacity) {
+    const wastedSeats = table.capacity - currentCount;
+    score -= wastedSeats * 10;
+  }
+
   for (let i = 0; i < table.guests.length; i++) {
     for (let j = i + 1; j < table.guests.length; j++) {
       const g1 = table.guests[i];
@@ -57,17 +57,16 @@ function calculateTableScore(table: Table): number {
       const sameSide = g1.side === g2.side && g1.side !== "Joint";
       const sameAge = g1.ageGroup === g2.ageGroup;
 
-      // סופר-בונוס: משפחה מאותה דרגה ומאותו צד (למשל דודים של החתן)
       if (sameRel && sameSide) {
         score += 600;
       } else if (sameRel) {
-        score += 150; // רק אותו קשר (למשל צבא וצבא)
+        score += 150;
       } else if (sameSide) {
-        score += 50; // רק אותו צד
+        score += 50;
       }
 
       if (sameAge) {
-        score += 40; // בונוס קטן על התאמת גיל בשולחנות רגילים
+        score += 40;
       }
     }
   }
@@ -80,18 +79,15 @@ function calculateTotalScore(tables: Table[]): number {
 }
 
 // ==========================================
-// 2. פונקציית האופטימיזציה
+// 2. פונקציית האופטימיזציה המרכזית
 // ==========================================
 export function optimizeSeating(
   allGuests: Guest[],
   tableConfig: { count10: number; count12: number; count20: number },
-  iterations: number = 100000, // העלינו את כמות הניסיונות
+  iterations: number = 100000,
 ): Table[] {
   const relevantGuests = allGuests.filter((g) => g.status !== "Declined");
 
-  // === שינוי קריטי: First-Fit Decreasing ===
-  // ממיינים קודם את המשפחות הגדולות ביותר! ככה הבלוקים הגדולים תופסים מקום
-  // ואת הזוגות והבודדים האלגוריתם ידחוף לחורים שנשארו. (מונע שולחנות חצי ריקים)
   relevantGuests.sort((a, b) => b.expectedGuests - a.expectedGuests);
 
   let tables: Table[] = [];
@@ -125,13 +121,11 @@ export function optimizeSeating(
       capacity: 20,
     });
 
-  const tableCount = tables.length;
-
-  // פיזור ראשוני חכם (ולא אקראי)
+  // פיזור ראשוני חכם
   for (const guestGroup of relevantGuests) {
     let placed = false;
 
-    // קודם כל מנסים לדחוף קבוצות של צעירים מהצבא/חברים לשולחן האבירים (אם יש מקום)
+    // 1. קודם כל מנסים לדחוף צעירים לשולחן האבירים (אם יש מקום)
     if (
       guestGroup.ageGroup === "YoungAdults" &&
       ["Army", "Work", "Friends", "Study"].includes(guestGroup.relationship)
@@ -148,39 +142,53 @@ export function optimizeSeating(
       }
     }
 
-    // אם לא שובצו לאבירים, מחפשים את השולחן הראשון שיש בו מקום לכל הבלוק
+    // 2. אם לא שובצו, מחפשים שולחן רגיל פנוי (מגנים על האבירים מפני מבוגרים)
     if (!placed) {
-      for (let i = 0; i < tableCount; i++) {
+      for (let i = 0; i < tables.length; i++) {
+        const targetTable = tables[i];
+
+        // הגנה: לעולם אל תדחוף מבוגרים לשולחן של 20 בפיזור הראשוני
         if (
-          tables[i].currentSeats + guestGroup.expectedGuests <=
-          tables[i].capacity
+          targetTable.capacity === 20 &&
+          guestGroup.ageGroup !== "YoungAdults"
         ) {
-          tables[i].guests.push(guestGroup);
-          tables[i].currentSeats += guestGroup.expectedGuests;
+          continue;
+        }
+
+        if (
+          targetTable.currentSeats + guestGroup.expectedGuests <=
+          targetTable.capacity
+        ) {
+          targetTable.guests.push(guestGroup);
+          targetTable.currentSeats += guestGroup.expectedGuests;
           placed = true;
           break;
         }
       }
     }
 
-    // אם באמת אין שום שולחן עם מספיק מקום, דוחפים לשולחן הכי פנוי וסופגים קנס כדי שהאלגוריתם יתקן
-    if (!placed && tableCount > 0) {
-      const emptiestTable = [...tables].sort(
-        (a, b) => a.currentSeats - b.currentSeats,
-      )[0];
-      emptiestTable.guests.push(guestGroup);
-      emptiestTable.currentSeats += guestGroup.expectedGuests;
+    // 3. התיקון הגדול: פתיחת שולחן רזרבה דינמי
+    if (!placed) {
+      const reserveTable: Table = {
+        id: `reserve-${Date.now()}-${Math.random()}`,
+        name: `שולחן רזרבה (10)`,
+        guests: [guestGroup],
+        currentSeats: guestGroup.expectedGuests,
+        capacity: 10,
+      };
+      tables.push(reserveTable);
+      console.log(`⚠️ נפתח שולחן רזרבה עבור: ${guestGroup.name}`);
     }
   }
 
   let currentScore = calculateTotalScore(tables);
 
-  // לולאת הלמידה: עכשיו משפרת סידור שהוא כבר טוב יחסית
   for (let i = 0; i < iterations; i++) {
-    if (tableCount <= 1) break;
+    // השתמשנו ב-tables.length דינמי כדי שיתחשב גם בשולחנות הרזרבה!
+    if (tables.length <= 1) break;
 
-    const t1Index = Math.floor(Math.random() * tableCount);
-    const t2Index = Math.floor(Math.random() * tableCount);
+    const t1Index = Math.floor(Math.random() * tables.length);
+    const t2Index = Math.floor(Math.random() * tables.length);
 
     if (t1Index === t2Index) continue;
 
@@ -203,43 +211,49 @@ export function optimizeSeating(
     const originalT1Seats = table1.currentSeats;
     const originalT2Seats = table2.currentSeats;
 
-    if (g1Index !== -1 && g2Index !== -1) {
-      const guest1 = table1.guests[g1Index];
-      const guest2 = table2.guests[g2Index];
+    // === התיקון שלנו: 50% סיכוי להעברה, 50% סיכוי להחלפה הדדית ===
+    const tryMove = Math.random() < 0.5;
 
-      table1.guests[g1Index] = guest2;
-      table2.guests[g2Index] = guest1;
-      table1.currentSeats =
-        table1.currentSeats - guest1.expectedGuests + guest2.expectedGuests;
-      table2.currentSeats =
-        table2.currentSeats - guest2.expectedGuests + guest1.expectedGuests;
-    } else if (g1Index !== -1) {
-      const guest1 = table1.guests.splice(g1Index, 1)[0];
-      table2.guests.push(guest1);
-      table1.currentSeats -= guest1.expectedGuests;
-      table2.currentSeats += guest1.expectedGuests;
-    } else if (g2Index !== -1) {
-      const guest2 = table2.guests.splice(g2Index, 1)[0];
-      table1.guests.push(guest2);
-      table2.currentSeats -= guest2.expectedGuests;
-      table1.currentSeats += guest2.expectedGuests;
+    if (tryMove) {
+      // מנסים להעביר קבוצה משולחן אחד לשני בלי לקחת כלום בחזרה
+      if (Math.random() < 0.5 && g1Index !== -1) {
+        const guest1 = table1.guests.splice(g1Index, 1)[0];
+        table2.guests.push(guest1);
+        table1.currentSeats = table1.currentSeats - guest1.expectedGuests;
+        table2.currentSeats = table2.currentSeats + guest1.expectedGuests;
+      } else if (g2Index !== -1) {
+        const guest2 = table2.guests.splice(g2Index, 1)[0];
+        table1.guests.push(guest2);
+        table2.currentSeats = table2.currentSeats - guest2.expectedGuests;
+        table1.currentSeats = table1.currentSeats + guest2.expectedGuests;
+      }
+    } else {
+      // מנסים לעשות טרייד (החלפה הדדית קלאסית)
+      if (g1Index !== -1 && g2Index !== -1) {
+        const guest1 = table1.guests[g1Index];
+        const guest2 = table2.guests[g2Index];
+
+        table1.guests[g1Index] = guest2;
+        table2.guests[g2Index] = guest1;
+        table1.currentSeats =
+          table1.currentSeats - guest1.expectedGuests + guest2.expectedGuests;
+        table2.currentSeats =
+          table2.currentSeats - guest2.expectedGuests + guest1.expectedGuests;
+      }
     }
 
     const newScore = calculateTotalScore(tables);
 
+    // אם הניקוד החדש טוב יותר - משאירים. אחרת, מבטלים (Rollback)
     if (newScore > currentScore) {
-      currentScore = newScore; // הצלחה!
+      currentScore = newScore;
     } else {
-      // גרוע יותר - מבטלים
       table1.guests = originalTable1Guests;
       table2.guests = originalTable2Guests;
       table1.currentSeats = originalT1Seats;
       table2.currentSeats = originalT2Seats;
     }
   }
-
-  // הדפסה ל-Console כדי שתוכל לראות את הציון
-  console.log("🏆 ציון אופטימיזציה סופי:", currentScore);
 
   return tables.filter((t) => t.currentSeats > 0);
 }
