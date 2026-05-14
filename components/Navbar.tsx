@@ -47,6 +47,7 @@ export const Navbar = () => {
   const menuItems = [
     { name: "עמוד הבית", href: "/" },
     { name: "ניהול מוזמנים", href: "/guests" },
+    { name: "ניהול משימות", href: "/tasks" },
     { name: "סידור הושבה חכם", href: "/seating" },
     { name: "ניהול תקציב", href: "/Budget" },
     { name: "מחשבון אלכוהול", href: "/Alcohol" },
