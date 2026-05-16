@@ -1,21 +1,21 @@
 "use client";
 
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import useSWR from "swr";
 import { createClient } from "@/utils/supabase/client";
 import { Guest } from "@/types/guest";
 import * as XLSX from "xlsx";
 
-const relationshipMap: Record<string, string> = {
-  ImmediateFamily: "משפחה גרעינית",
-  ExtendedFamily: "משפחה מורחבת",
-  Friends: "חברים",
-  Army: "צבא",
-  Work: "עבודה",
-  Study: "לימודים",
-  ParentsGuests: "מוזמני הורים",
-  Other: "אחר",
-};
+// ייבוא פעולות השרת שיצרנו
+import {
+  getGuests,
+  addGuest,
+  updateGuest,
+  deleteGuest,
+  deleteAllGuests,
+  uploadGuestsFromExcel,
+} from "@/app/actions/guests";
+import { getCategories } from "@/app/actions/categories";
 
 const ageGroupMap: Record<string, string> = {
   Adults: "מבוגרים",
@@ -27,15 +27,7 @@ type GuestFormData = {
   name: string;
   phone: string;
   side: "Bride" | "Groom" | "Joint";
-  relationship:
-    | "ImmediateFamily"
-    | "ExtendedFamily"
-    | "Friends"
-    | "Army"
-    | "Work"
-    | "Study"
-    | "ParentsGuests"
-    | "Other";
+  relationship: string;
   ageGroup: "Adults" | "YoungAdults" | "Kids";
   expectedGuests: number;
   status: Guest["status"];
@@ -61,7 +53,7 @@ export default function GuestsPage() {
     name: "",
     phone: "",
     side: "Joint",
-    relationship: "Other",
+    relationship: "", // ריק כברירת מחדל כדי לאפשר הקלדה
     ageGroup: "Adults",
     expectedGuests: 1,
     status: "Pending",
@@ -69,35 +61,36 @@ export default function GuestsPage() {
 
   const [newGuest, setNewGuest] = useState<GuestFormData>(defaultGuestState);
 
-  // --- הוספנו פה לוגים כדי שנוכל לדבג בקונסול ---
-  const fetchGuests = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+  // --- ניהול נתונים עם SWR ---
 
-    if (!session) {
-      console.log("No session found during fetchGuests!");
+  // שליפת קטגוריות חכמה ובטוחה
+  const fetchCategoriesForSWR = async () => {
+    const res = await getCategories();
+    if (!res.success) {
+      console.error("Error fetching categories:", res.error);
       return [];
     }
-
-    const { data, error } = await supabase
-      .from("guests")
-      .select("*")
-      .eq("user_id", session.user.id)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching guests:", error);
-      throw error;
-    }
-
-    console.log("✅ Fetched guests from DB successfully:", data);
-    return data as Guest[];
+    return res.categories || [];
   };
 
-  const { data: guests = [], mutate } = useSWR<Guest[]>(
+  const { data: categories = [], mutate: mutateCategories } = useSWR<any[]>(
+    "categories_list",
+    fetchCategoriesForSWR,
+  );
+
+  // טעינת אורחים באמצעות פעולת השרת
+  const fetchGuestsData = async () => {
+    const res = await getGuests();
+    if (!res.success) {
+      // הסרנו את ה-console.error כדי שהמערכת לא תכעס
+      return [];
+    }
+    return res.guests as Guest[];
+  };
+
+  const { data: guests = [], mutate: mutateGuests } = useSWR<Guest[]>(
     "guests_list",
-    fetchGuests,
+    fetchGuestsData,
   );
 
   const fetchProfile = async () => {
@@ -114,43 +107,54 @@ export default function GuestsPage() {
   };
   const { data: profile } = useSWR("user_profile", fetchProfile);
 
+  // --- חישובים וסטטיסטיקות ---
+
   const stats = useMemo(
     () => ({
-      total: guests.reduce((sum, g) => sum + (g.expectedGuests || 0), 0),
+      total: guests.reduce(
+        (sum, g) => sum + (g.expectedGuests || g.invited_count || 0),
+        0,
+      ),
       confirmed: guests
         .filter((g) => g.status === "Confirmed")
-        .reduce((sum, g) => sum + (g.expectedGuests || 0), 0),
+        .reduce(
+          (sum, g) => sum + (g.expectedGuests || g.invited_count || 0),
+          0,
+        ),
       pending: guests
         .filter((g) => g.status === "Pending")
-        .reduce((sum, g) => sum + (g.expectedGuests || 0), 0),
+        .reduce(
+          (sum, g) => sum + (g.expectedGuests || g.invited_count || 0),
+          0,
+        ),
       declined: guests
         .filter((g) => g.status === "Declined")
-        .reduce((sum, g) => sum + (g.expectedGuests || 0), 0),
+        .reduce(
+          (sum, g) => sum + (g.expectedGuests || g.invited_count || 0),
+          0,
+        ),
     }),
     [guests],
   );
 
-  // --- התיקון הקריטי: סינון חסין קריסות (Null-Safe) ---
   const filteredGuests = useMemo(() => {
     if (!guests || guests.length === 0) return [];
 
     return guests.filter((guest) => {
-      // 1. הגנה: הופכים את הערכים למחרוזות בטוחות כדי למנוע קריסת Includes
-      const safeName = guest.name ? String(guest.name).toLowerCase() : "";
+      const safeName =
+        guest.name || guest.first_name
+          ? String(guest.name || guest.first_name).toLowerCase()
+          : "";
       const safePhone = guest.phone ? String(guest.phone) : "";
       const searchLower = searchQuery ? searchQuery.toLowerCase() : "";
 
-      // 2. בדיקת חיפוש בטוחה
       const matchesSearch =
         searchLower === "" ||
         safeName.includes(searchLower) ||
         safePhone.includes(searchLower);
-
       const matchesStatus =
         statusFilter === "All" || guest.status === statusFilter;
-
       const matchesSide = sideFilter === "All" || guest.side === sideFilter;
-
       const matchesRelationship =
         relationshipFilter === "All" ||
         guest.relationship === relationshipFilter;
@@ -161,89 +165,19 @@ export default function GuestsPage() {
     });
   }, [guests, searchQuery, statusFilter, sideFilter, relationshipFilter]);
 
-  // חישוב דינמי של כמות האנשים המוצגים כרגע בטבלה
   const filteredTotalGuests = useMemo(() => {
-    return filteredGuests.reduce((sum, g) => sum + (g.expectedGuests || 0), 0);
+    return filteredGuests.reduce(
+      (sum, g) => sum + (g.expectedGuests || g.invited_count || 0),
+      0,
+    );
   }, [filteredGuests]);
 
-  const getSmartValue = (row: any, keywords: string[]) => {
-    const keys = Object.keys(row);
-    for (const key of keys) {
-      const cleanKey = key
-        .trim()
-        .toLowerCase()
-        .replace(/[\u200B-\u200D\uFEFF]/g, "");
-      if (keywords.some((kw) => cleanKey.includes(kw.toLowerCase())))
-        return row[key];
-    }
-    return undefined;
-  };
-
-  const parseRelationship = (val: any): Guest["relationship"] => {
-    if (!val) return "Other";
-    const s = String(val).trim().toLowerCase();
-    const englishKeys: Record<string, Guest["relationship"]> = {
-      immediatefamily: "ImmediateFamily",
-      extendedfamily: "ExtendedFamily",
-      friends: "Friends",
-      army: "Army",
-      work: "Work",
-      study: "Study",
-      parentsguests: "ParentsGuests",
-      other: "Other",
-    };
-    if (englishKeys[s]) return englishKeys[s];
-    if (
-      s.includes("גרעינית") ||
-      s.includes("קרוב") ||
-      s.includes("אחים") ||
-      (s.includes("הורים") && !s.includes("מוזמני"))
-    )
-      return "ImmediateFamily";
-    if (
-      s.includes("מורחבת") ||
-      s.includes("משפחה") ||
-      s.includes("דוד") ||
-      s.includes("סבא") ||
-      s.includes("סבתא")
-    )
-      return "ExtendedFamily";
-    if (s.includes("חבר") || s.includes("ידיד")) return "Friends";
-    if (s.includes("עבודה") || s.includes("משרד") || s.includes("קולגה"))
-      return "Work";
-    if (s.includes("צבא") || s.includes("מילואים") || s.includes("צוות"))
-      return "Army";
-    if (
-      s.includes("לימוד") ||
-      s.includes("תואר") ||
-      s.includes("אוניברסיטה") ||
-      s.includes("מכללה") ||
-      s.includes("סטודנט") ||
-      s.includes("mta")
-    )
-      return "Study";
-    if (s.includes("מוזמני") || s.includes("אורחי הורים"))
-      return "ParentsGuests";
-    return "Other";
-  };
-
-  const parseAgeGroup = (val: any): Guest["ageGroup"] => {
-    if (!val) return "Adults";
-    const s = String(val).trim().toLowerCase();
-    if (s.includes("ילד") || s.includes("kids")) return "Kids";
-    if (s.includes("צעיר") || s.includes("חברה") || s.includes("young"))
-      return "YoungAdults";
-    return "Adults";
-  };
+  // --- פעולות ופונקציות ---
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsUploading(true);
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) return;
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -252,59 +186,98 @@ export default function GuestsPage() {
         const wb = XLSX.read(bstr, { type: "binary" });
         const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-        const mappedGuests = data.map((item: any) => {
-          const rawSide = String(
-            getSmartValue(item, ["צד", "side", "חתן", "כלה"]) || "",
-          ).trim();
-          let side: Guest["side"] = "Joint";
-          if (rawSide.includes("חתן") || rawSide.toLowerCase() === "groom")
-            side = "Groom";
-          else if (rawSide.includes("כלה") || rawSide.toLowerCase() === "bride")
-            side = "Bride";
+        // מסננים שורות ריקות או שורות של המדריך שאין בהן מידע אמיתי
+        const validRows = data.filter((item: any) => {
+          return Object.keys(item).some(
+            (k) =>
+              k.trim().includes("שם") &&
+              item[k] &&
+              String(item[k]).trim() !== "",
+          );
+        });
 
-          const rawRel = getSmartValue(item, [
-            "קשר",
-            "קרבה",
-            "relationship",
-            "relation",
-            "סוג",
-          ]);
-          const rawAge = getSmartValue(item, [
-            "גיל",
-            "קבוצת גיל",
-            "age",
-            "צעירים",
-          ]);
+        const mappedGuests = validRows.map((item: any) => {
+          let nameVal = "";
+          let phoneVal = "";
+          let sideVal = "Joint";
+          let relVal = "אחר";
+          let countVal = 1;
+          let statusVal = "Pending";
+          let ageGroupVal = "Adults";
+
+          // לולאה חכמה שעוברת על כל העמודות בשורה ומחלצת נתונים
+          for (const key of Object.keys(item)) {
+            const cleanKey = key.trim();
+            const val = String(item[key]).trim();
+
+            if (cleanKey.includes("שם")) {
+              nameVal = val;
+            } else if (
+              cleanKey.includes("טלפון") ||
+              cleanKey.includes("נייד")
+            ) {
+              phoneVal = val;
+            } else if (cleanKey.includes("צד")) {
+              if (val.includes("חתן")) sideVal = "Groom";
+              else if (val.includes("כלה")) sideVal = "Bride";
+              else sideVal = "Joint";
+            } else if (cleanKey.includes("קרבה") || cleanKey.includes("קשר")) {
+              relVal = val;
+            } else if (
+              cleanKey.includes("כמות") ||
+              cleanKey.includes("מספר") ||
+              cleanKey.includes("אורחים")
+            ) {
+              countVal = Number(val) || 1;
+            } else if (
+              cleanKey.includes("סטטוס") ||
+              cleanKey.includes("הגעה")
+            ) {
+              // הוספנו תמיכה מלאה ב-"מגיע" וב-"לא מגיע"
+              if (
+                val.includes("אישר") ||
+                (val.includes("מגיע") && !val.includes("לא מגיע"))
+              )
+                statusVal = "Confirmed";
+              else if (
+                val.includes("סירב") ||
+                val.includes("ביטל") ||
+                val.includes("לא מגיע")
+              )
+                statusVal = "Declined";
+              else statusVal = "Pending";
+            } else if (cleanKey.includes("צעיר")) {
+              if (val === "כן" || val === "true" || val === "yes")
+                ageGroupVal = "YoungAdults";
+              else ageGroupVal = "Adults";
+            }
+          }
 
           return {
-            id: crypto.randomUUID(),
-            user_id: session.user.id,
-            name: String(
-              getSmartValue(item, ["שם", "אורח", "name"]) || "ללא שם",
-            ).trim(),
-            phone: String(
-              getSmartValue(item, ["טלפון", "נייד", "phone", "mobile"]) || "",
-            ).trim(),
-            expectedGuests:
-              Number(getSmartValue(item, ["כמות", "מוזמנים", "כמה", "qty"])) ||
-              1,
-            side,
-            relationship: parseRelationship(rawRel),
-            ageGroup: parseAgeGroup(rawAge),
-            status: "Pending",
+            name: nameVal,
+            first_name: nameVal,
+            phone: phoneVal,
+            expectedGuests: countVal,
+            invited_count: countVal,
+            side: sideVal,
+            relationship: relVal,
+            status: statusVal,
+            ageGroup: ageGroupVal,
           };
         });
 
-        const { error: insertError } = await supabase
-          .from("guests")
-          .insert(mappedGuests);
-        if (insertError) throw insertError;
+        const res = await uploadGuestsFromExcel(mappedGuests);
 
-        mutate();
-        alert(`הייבוא הושלם! יובאו ${mappedGuests.length} אורחים.`);
-      } catch (err) {
+        if (res.success) {
+          mutateGuests();
+          mutateCategories();
+          alert(`הייבוא הושלם בהצלחה! יובאו ${mappedGuests.length} אורחים.`);
+        } else {
+          throw new Error(res.error);
+        }
+      } catch (err: any) {
         console.error(err);
-        alert("שגיאה בייבוא. וודאו שהעמודות באקסל ברורות.");
+        alert("שגיאה בתהליך העלאת הקובץ: " + err.message);
       } finally {
         setIsUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = "";
@@ -314,54 +287,70 @@ export default function GuestsPage() {
   };
 
   const handleStatusChange = async (guestId: string, newStatus: string) => {
-    mutate(
+    mutateGuests(
       (currentGuests) =>
         currentGuests?.map((g) =>
           g.id === guestId ? { ...g, status: newStatus as any } : g,
         ),
       false,
     );
-    await supabase
-      .from("guests")
-      .update({ status: newStatus })
-      .eq("id", guestId);
-    mutate();
+    await updateGuest(guestId, { status: newStatus });
+    mutateGuests();
   };
 
   const handleOpenEdit = (guest: Guest) => {
     setEditingGuestId(guest.id);
     setNewGuest({
-      name: guest.name,
+      name: guest.name || guest.first_name || "",
       phone: guest.phone || "",
       side: guest.side,
-      relationship: guest.relationship,
+      relationship: guest.relationship || "",
       ageGroup: guest.ageGroup || "Adults",
-      expectedGuests: guest.expectedGuests || 1,
+      expectedGuests: guest.expectedGuests || guest.invited_count || 1,
       status: guest.status || "Pending",
     });
     setIsAddModalOpen(true);
   };
 
   const handleDeleteSingle = async (guest: Guest) => {
-    if (!confirm(`האם אתה בטוח שברצונך למחוק את ${guest.name}?`)) return;
-    const { error } = await supabase.from("guests").delete().eq("id", guest.id);
-    if (error) alert("מחיקה נכשלה");
-    else mutate();
+    if (
+      !confirm(
+        `האם אתה בטוח שברצונך למחוק את ${guest.name || guest.first_name}?`,
+      )
+    )
+      return;
+
+    // 1. עדכון אופטימי: מעיפים את האורח מהמסך מיד, בלי לחכות לשרת!
+    mutateGuests(
+      (currentGuests) => currentGuests?.filter((g) => g.id !== guest.id),
+      false, // false אומר ל-SWR לא למשוך נתונים מהשרת עדיין
+    );
+
+    // 2. פנייה לשרת ברקע
+    const res = await deleteGuest(guest.id);
+
+    if (!res.success) {
+      alert("מחיקה נכשלה");
+      // 3. משהו השתבש? אנחנו קוראים ל-mutate ריק כדי להחזיר את האורח למסך מהשרת
+      mutateGuests();
+    } else {
+      // 4. עבד? מצוין, מסנכרנים סופית
+      mutateGuests();
+    }
   };
 
   const handleDeleteAll = async () => {
     if (!confirm("⚠️ מחיקת כל האורחים לצמיתות? הפעולה לא ניתנת לביטול!"))
       return;
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) return;
-    const { error } = await supabase
-      .from("guests")
-      .delete()
-      .eq("user_id", session.user.id);
-    if (error) alert("מחיקה נכשלה");
-    mutate([]);
+
+    // שימוש בפעולת השרת החדשה והבטוחה שלנו
+    const res = await deleteAllGuests();
+
+    if (!res.success) {
+      alert("מחיקה נכשלה: " + res.error);
+    } else {
+      mutateGuests(); // מרענן את הרשימה כך שהכל ייעלם מיד מהמסך
+    }
   };
 
   const handleSendWhatsApp = (guest: Guest) => {
@@ -372,57 +361,176 @@ export default function GuestsPage() {
       : guest.phone.replace(/\D/g, "");
     const rsvpLink = `https://wedding-project-omega-flame.vercel.app/${slug}/rsvp/${guest.id}`;
     window.open(
-      `https://wa.me/${cleanPhone}?text=${encodeURIComponent(`היי ${guest.name}! נשמח לראותכם בחתונה שלנו ב-2.6 💍 אנא אשרו הגעה כאן: ${rsvpLink}`)}`,
+      `https://wa.me/${cleanPhone}?text=${encodeURIComponent(`היי ${guest.name || guest.first_name}! נשמח לראותכם בחתונה שלנו ב-2.6 💍 אנא אשרו הגעה כאן: ${rsvpLink}`)}`,
       "_blank",
     );
   };
 
   const handleSaveGuest = async (e: React.FormEvent) => {
     e.preventDefault();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) return;
 
-    if (editingGuestId) {
-      const { error } = await supabase
-        .from("guests")
-        .update(newGuest)
-        .eq("id", editingGuestId);
-      if (error) alert("עדכון נכשל");
-    } else {
-      const { error } = await supabase
-        .from("guests")
-        .insert([
-          { ...newGuest, id: crypto.randomUUID(), user_id: session.user.id },
-        ]);
-      if (error) alert("הוספה נכשלה");
-    }
+    const data = {
+      name: newGuest.name,
+      phone: newGuest.phone,
+      side: newGuest.side,
+      relationship: newGuest.relationship || "אחר",
+      ageGroup: newGuest.ageGroup,
+      expectedGuests: newGuest.expectedGuests,
+      status: newGuest.status,
+    };
+
+    // 1. סוגרים את המודל מיד למען חווית המשתמש
     setIsAddModalOpen(false);
-    mutate();
+
+    // 2. מייצרים אובייקט "אופטימי" שמדמה את מה שהשרת יחזיר
+    const optimisticGuest = {
+      id: editingGuestId || `temp-${Date.now()}`, // ID זמני אם זה אורח חדש
+      ...data,
+    };
+
+    // 3. עדכון אופטימי של הרשימה במסך
+    mutateGuests((currentGuests) => {
+      if (!currentGuests) return [optimisticGuest as Guest];
+      if (editingGuestId) {
+        // אם זה עדכון - מחליפים את האורח הקיים
+        return currentGuests.map((g) =>
+          g.id === editingGuestId ? { ...g, ...optimisticGuest } : g,
+        ) as Guest[];
+      }
+      // אם זה הוספה - דוחפים אותו לתחילת הרשימה
+      return [optimisticGuest as Guest, ...currentGuests];
+    }, false);
+
+    // 4. שליחת הבקשה האמיתית לשרת
+    const res = editingGuestId
+      ? await updateGuest(editingGuestId, data)
+      : await addGuest(data);
+
+    if (res.success) {
+      // 5. סנכרון סופי של ה-ID האמיתי מהשרת (וקטגוריות למקרה שהוספנו חדשה)
+      mutateGuests();
+      mutateCategories();
+    } else {
+      alert("פעולה נכשלה: " + res.error);
+      // אם נכשל, מבטלים את העדכון האופטימי ומחזירים את המצב לקדמותו
+      mutateGuests();
+    }
   };
 
   const downloadTemplate = () => {
-    const ws = XLSX.utils.json_to_sheet([
-      {
-        שם: "ישראל ישראלי",
-        טלפון: "0501234567",
-        צד: "חתן",
-        קרבה: "חברים",
-        גיל: "צעירים",
-        כמות: 2,
-      },
-      {
-        שם: "משפחת כהן",
-        טלפון: "0541112233",
-        צד: "כלה",
-        קרבה: "משפחה גרעינית",
-        גיל: "מבוגרים",
-        כמות: 4,
-      },
-    ]);
+    // בניית מטריצת האקסל שורות-שורות, בדיוק כמו בתמונה ששלחת
+    const matrix = [
+      // שורה 1: כותרות הנתונים
+      [
+        "שם פרטי ושם משפחה",
+        "מספר טלפון",
+        "צד",
+        "קרבה",
+        "כמות",
+        "סטטוס הגעה",
+        "צעיר?",
+      ],
+      // שורה 2: דוגמה 1
+      ["ישראל ישראלי", "0501234567", "חתן", "חברים מהתואר", "2", "אישר", "כן"],
+      // שורה 3: דוגמה 2
+      ["משפחת כהן", "0541112233", "כלה", "משפחה גרעינית", "4", "ממתין", "לא"],
+      // שורה 4: דוגמה 3
+      ["יהל לוי", "0529998877", "משותף", "חברים מהצבא", "1", "סירב", "כן"],
+      // שורות 5-7: רווחים כדי שהמדריך יתחיל נמוך יותר
+      [],
+      [],
+      [],
+      // שורה 8: כותרת המדריך (מתחיל בעמודה ה-11)
+      ["", "", "", "", "", "", "", "", "", "", "📋 מדריך למילוי מהיר"],
+      // שורה 9: כותרות משנה למדריך
+      ["", "", "", "", "", "", "", "", "", "", "עמודה", "ערכים מותרים להקלדה"],
+      // שורה 10: הסבר צד
+      ["", "", "", "", "", "", "", "", "", "", "צד", "חתן / כלה / משותף"],
+      // שורה 11: הסבר סטטוס
+      [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "סטטוס הגעה",
+        "אישר / סירב / ממתין",
+      ],
+      // שורה 12: הסבר צעיר
+      [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "צעיר?",
+        "כן (יושב באבירים) / לא (שולחן רגיל)",
+      ],
+      // שורה 13: הסבר קרבה
+      [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "קרבה",
+        "הקלד קבוצה חופשית (למשל: עבודה, אקדמיה)",
+      ],
+      // שורה 14: אזהרה
+      [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "⚠️ חשוב מאוד",
+        "נא לא למחוק או לשנות את שורת הכותרות (שורה 1)",
+      ],
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(matrix);
+
+    // קסם קטן: מכריח את האקסל להיפתח מימין לשמאל!
+    ws["!dir"] = "rtl";
+
+    // קביעת רוחב העמודות בדיוק לפי הפרופורציות שעיצבת
+    ws["!cols"] = [
+      { wch: 25 }, // A: שם
+      { wch: 15 }, // B: טלפון
+      { wch: 10 }, // C: צד
+      { wch: 20 }, // D: קרבה
+      { wch: 8 }, // E: כמות
+      { wch: 15 }, // F: סטטוס הגעה
+      { wch: 10 }, // G: צעיר?
+      { wch: 5 }, // H: רווח
+      { wch: 5 }, // I: רווח
+      { wch: 5 }, // J: רווח
+      { wch: 18 }, // K: כותרת מדריך / עמודה
+      { wch: 45 }, // L: תוכן מדריך
+    ];
+
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "אורחים");
+    XLSX.utils.book_append_sheet(wb, ws, "רשימת מוזמנים");
     XLSX.writeFile(wb, "template_wedding_guests.xlsx");
   };
 
@@ -521,7 +629,6 @@ export default function GuestsPage() {
         </header>
 
         <div className="bg-white rounded-[32px] shadow-sm border border-stone-200 overflow-hidden">
-          {/* סרגל הסינונים והמונה */}
           <div className="p-4 md:p-6 border-b border-stone-100 bg-stone-50/50 flex flex-col xl:flex-row gap-4 items-center justify-between">
             <div className="flex flex-col md:flex-row gap-3 w-full xl:w-auto">
               <div className="relative w-full md:w-64">
@@ -546,21 +653,21 @@ export default function GuestsPage() {
                 <option value="Groom">צד חתן 🤵</option>
                 <option value="Joint">משותף 🤝</option>
               </select>
+
               <select
                 value={relationshipFilter}
                 onChange={(e) => setRelationshipFilter(e.target.value)}
                 className="bg-white border border-stone-200 rounded-xl py-2 px-4 outline-none focus:border-wedding-brown text-sm font-medium text-stone-600 cursor-pointer w-full md:w-auto"
               >
                 <option value="All">כל הקרבות</option>
-                {Object.entries(relationshipMap).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
+                {categories.map((cat, idx) => (
+                  <option key={idx} value={cat.name}>
+                    {cat.name}
                   </option>
                 ))}
               </select>
             </div>
 
-            {/* המונה החי */}
             <div className="flex items-center gap-2 bg-white px-4 py-2.5 rounded-xl border border-stone-200 shadow-sm w-full xl:w-auto justify-center">
               <span className="text-stone-500 text-sm font-bold">מציג:</span>
               <span className="bg-stone-100 text-stone-700 px-2 py-0.5 rounded-md text-sm font-black">
@@ -602,7 +709,7 @@ export default function GuestsPage() {
                   >
                     <td className="p-6">
                       <div className="font-bold text-stone-800 text-lg">
-                        {guest.name}
+                        {guest.name || guest.first_name}
                       </div>
                       <div
                         className="text-sm text-stone-400 font-mono mt-0.5"
@@ -623,13 +730,12 @@ export default function GuestsPage() {
                               : "משותף 🤝"}
                         </span>
                         <span className="text-xs text-stone-500 font-medium">
-                          {relationshipMap[guest.relationship] ||
-                            guest.relationship}
+                          {guest.relationship}
                         </span>
                       </div>
                     </td>
                     <td className="p-6 text-center font-black text-wedding-dark text-xl">
-                      {guest.expectedGuests}
+                      {guest.expectedGuests || guest.invited_count}
                     </td>
                     <td className="p-6">
                       <select
@@ -683,7 +789,6 @@ export default function GuestsPage() {
         </div>
       </div>
 
-      {/* מודל הוספה / עריכה */}
       {isAddModalOpen && (
         <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
           <div className="bg-white rounded-[40px] p-8 md:p-10 w-full max-w-2xl shadow-2xl animate-in zoom-in duration-300 overflow-y-auto max-h-[90vh]">
@@ -800,25 +905,31 @@ export default function GuestsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-stone-500 mb-2 mr-1">
-                    קרבה
-                  </label>
-                  <select
-                    value={newGuest.relationship}
-                    onChange={(e) =>
-                      setNewGuest({
-                        ...newGuest,
-                        relationship: e.target.value as any,
-                      })
-                    }
-                    className="w-full p-4 bg-stone-50 border border-stone-200 rounded-2xl outline-none cursor-pointer"
+                  <label
+                    htmlFor="relationship-input"
+                    className="block text-sm font-bold text-stone-500 mb-2 mr-1"
                   >
-                    {Object.entries(relationshipMap).map(([k, v]) => (
-                      <option key={k} value={k}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
+                    קרבה (הקלד או בחר)
+                  </label>
+                  <input
+                    id="relationship-input"
+                    type="text"
+                    list="dynamic-categories"
+                    value={newGuest.relationship || ""}
+                    onChange={(e) =>
+                      setNewGuest({ ...newGuest, relationship: e.target.value })
+                    }
+                    className="w-full p-4 bg-stone-50 border border-stone-200 rounded-2xl outline-none focus:border-wedding-brown transition-colors"
+                    placeholder="לדוגמה: עבודה"
+                  />
+                  <datalist id="dynamic-categories">
+                    {categories &&
+                      categories.map((cat, idx) => (
+                        <option key={idx} value={cat.name}>
+                          {cat.name}
+                        </option>
+                      ))}
+                  </datalist>
                 </div>
               </div>
               <div className="flex gap-4 pt-6">

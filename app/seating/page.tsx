@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { Guest } from "@/types/guest";
 import { optimizeSeating, Table } from "@/utils/seatingAlgorithm";
 import * as XLSX from "xlsx";
-import { createClient } from "@/utils/supabase/client";
+import { getGuests } from "@/app/actions/guests";
+import { saveSeatingPlan, loadSeatingPlan } from "@/app/actions/seating"; // הייבוא לטעינה ושמירה
+
 import {
   DragDropContext,
   Droppable,
@@ -15,12 +17,13 @@ import {
 
 export default function SeatingPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [mounted, setMounted] = useState(false);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [results, setResults] = useState<Table[] | null>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null); // הסטייט למודל האורח
+  const [isLoadingPlan, setIsLoadingPlan] = useState(true); // חיווי טעינת סידור קיים
 
   const [isEditing, setIsEditing] = useState(false);
 
@@ -30,29 +33,27 @@ export default function SeatingPage() {
     count20: 2,
   });
 
+  // משיכת האורחים וטעינת סידור השולחנות השמור בעליית העמוד
   useEffect(() => {
-    const fetchGuestsAndCheckAuth = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) {
-        router.push("/login");
-        return;
+    const fetchData = async () => {
+      // מביא את רשימת האורחים המעודכנת
+      const guestsRes = await getGuests();
+      if (guestsRes.success && guestsRes.guests) {
+        setGuests(guestsRes.guests as Guest[]);
       }
 
-      const { data: guestsData } = await supabase
-        .from("guests")
-        .select("*")
-        .eq("user_id", session.user.id);
-
-      if (guestsData) {
-        setGuests(guestsData as Guest[]);
+      // מביא את הסידור השמור מהפעם הקודמת (אם קיים)
+      const planRes = await loadSeatingPlan();
+      if (planRes.success && planRes.data) {
+        setResults(planRes.data);
       }
+
+      setIsLoadingPlan(false);
       setMounted(true);
     };
 
-    fetchGuestsAndCheckAuth();
-  }, [router, supabase]);
+    fetchData();
+  }, []);
 
   const handleOptimize = () => {
     setIsOptimizing(true);
@@ -60,10 +61,13 @@ export default function SeatingPage() {
     setIsEditing(false);
     const guestsToSeat = guests.filter((g) => g.status !== "Declined");
 
-    setTimeout(() => {
+    setTimeout(async () => {
       const finalTables = optimizeSeating(guestsToSeat, tableConfig);
       setResults(finalTables);
       setIsOptimizing(false);
+
+      // שמירה אוטומטית של הסידור החדש במסד הנתונים
+      await saveSeatingPlan(finalTables);
     }, 500);
   };
 
@@ -77,8 +81,8 @@ export default function SeatingPage() {
       exportData.push(["שם האורח/משפחה", "כמות אנשים", "הערות"]);
       table.guests.forEach((guest) => {
         exportData.push([
-          guest.name,
-          guest.expectedGuests,
+          guest.name || guest.first_name,
+          guest.expectedGuests || guest.invited_count || 1,
           guest.ageGroup === "YoungAdults" ? "צעירים" : "",
         ]);
       });
@@ -116,7 +120,7 @@ export default function SeatingPage() {
     setResults(results.filter((t) => t.id !== tableId));
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!results) return;
     const overfilledTables = results.filter((t) => t.currentSeats > t.capacity);
     if (overfilledTables.length > 0) {
@@ -125,8 +129,15 @@ export default function SeatingPage() {
       );
       return;
     }
-    setIsEditing(false);
-    alert("הסידור נשמר בהצלחה!");
+
+    // שומר את העריכה הידנית במסד הנתונים
+    const res = await saveSeatingPlan(results);
+    if (res.success) {
+      setIsEditing(false);
+      alert("הסידור נשמר בהצלחה! תוכל לחזור אליו בכל עת.");
+    } else {
+      alert("שגיאה בשמירת הסידור: " + res.error);
+    }
   };
 
   const onDragEnd = (result: DropResult) => {
@@ -155,38 +166,54 @@ export default function SeatingPage() {
       const [movedGuest] = sourceTable.guests.splice(source.index, 1);
       destTable.guests.splice(destination.index, 0, movedGuest);
 
+      const guestCount =
+        Number(movedGuest.expectedGuests) ||
+        Number(movedGuest.invited_count) ||
+        1;
+
       if (sourceTableIndex !== destTableIndex) {
-        sourceTable.currentSeats -= movedGuest.expectedGuests;
-        destTable.currentSeats += movedGuest.expectedGuests;
+        sourceTable.currentSeats -= guestCount;
+        destTable.currentSeats += guestCount;
       }
 
       return newResults;
     });
   };
 
-  // פונקציית עזר להחזרת צבע לפי סוג הקרבה
-  const getRelationshipColor = (rel: string) => {
-    switch (rel) {
-      case "Family":
-        return "bg-purple-100 text-purple-700 border-purple-200";
-      case "Friends":
-        return "bg-blue-100 text-blue-700 border-blue-200";
-      case "Army":
-        return "bg-green-100 text-green-700 border-green-200";
-      case "Work":
-        return "bg-orange-100 text-orange-700 border-orange-200";
-      case "Study":
-        return "bg-teal-100 text-teal-700 border-teal-200";
-      default:
-        return "bg-stone-100 text-stone-600 border-stone-200";
+  const getDynamicColor = (text: string) => {
+    if (!text) text = "אחר";
+    const colors = [
+      "bg-blue-100 text-blue-700 border-blue-200",
+      "bg-purple-100 text-purple-700 border-purple-200",
+      "bg-emerald-100 text-emerald-700 border-emerald-200",
+      "bg-orange-100 text-orange-700 border-orange-200",
+      "bg-rose-100 text-rose-700 border-rose-200",
+      "bg-amber-100 text-amber-700 border-amber-200",
+      "bg-indigo-100 text-indigo-700 border-indigo-200",
+      "bg-teal-100 text-teal-700 border-teal-200",
+    ];
+
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = text.charCodeAt(i) + ((hash << 5) - hash);
     }
+    return colors[Math.abs(hash) % colors.length];
   };
 
-  if (!mounted) return null;
+  if (!mounted || isLoadingPlan)
+    return (
+      <div className="min-h-screen bg-wedding-beige p-8 pt-32 text-center text-xl text-wedding-brown">
+        טוען נתונים...
+      </div>
+    );
 
   const totalGuestsToSeat = guests
     .filter((g) => g.status !== "Declined")
-    .reduce((acc, g) => acc + g.expectedGuests, 0);
+    .reduce(
+      (acc, g) =>
+        acc + (Number(g.expectedGuests) || Number(g.invited_count) || 1),
+      0,
+    );
 
   return (
     <div
@@ -275,9 +302,7 @@ export default function SeatingPage() {
                   : "bg-wedding-dark text-wedding-beige hover:shadow-xl hover:-translate-y-1"
             }`}
           >
-            {isOptimizing
-              ? "מחשב 20,000 וריאציות הושבה..."
-              : "✨ סדר לנו את האולם!"}
+            {isOptimizing ? "מחשב וריאציות הושבה..." : "✨ סדר לנו את האולם!"}
           </button>
         </div>
 
@@ -389,8 +414,8 @@ export default function SeatingPage() {
                         <div className="space-y-3 min-h-[100px]">
                           {table.guests.map((guest, idx) => (
                             <Draggable
-                              key={`${table.id}-${guest.name}-${idx}`}
-                              draggableId={`${table.id}-${guest.name}-${idx}`}
+                              key={`${table.id}-${guest.name || guest.first_name}-${idx}`}
+                              draggableId={`${table.id}-${guest.name || guest.first_name}-${idx}`}
                               index={idx}
                               isDragDisabled={!isEditing}
                             >
@@ -399,9 +424,12 @@ export default function SeatingPage() {
                                   ref={provided.innerRef}
                                   {...provided.draggableProps}
                                   {...provided.dragHandleProps}
+                                  onClick={() =>
+                                    !isEditing && setSelectedGuest(guest)
+                                  }
                                   className={`flex justify-between items-center text-sm p-2.5 rounded-lg border-r-4 transition-all select-none ${
                                     !isEditing
-                                      ? "opacity-90 cursor-default"
+                                      ? "opacity-90 cursor-pointer hover:bg-stone-50"
                                       : snapshot.isDragging
                                         ? "shadow-xl opacity-100 rotate-2 scale-105 z-50 cursor-grabbing bg-white"
                                         : "cursor-grab hover:bg-stone-50"
@@ -413,18 +441,20 @@ export default function SeatingPage() {
                                   style={provided.draggableProps.style}
                                 >
                                   <span className="font-bold text-stone-800">
-                                    {guest.name}{" "}
+                                    {guest.name || guest.first_name}{" "}
                                     <span className="text-stone-500 font-bold text-xs ml-1">
-                                      ({guest.expectedGuests})
+                                      (
+                                      {guest.expectedGuests ||
+                                        guest.invited_count}
+                                      )
                                     </span>
                                   </span>
 
-                                  {/* ======= כאן הוספנו את הצבעים הדינמיים והחזרנו את הנקודה! ======= */}
                                   <div className="flex gap-2 items-center">
                                     <span
-                                      className={`text-[10px] px-2 py-0.5 rounded-full border font-bold shadow-sm ${getRelationshipColor(guest.relationship)}`}
+                                      className={`text-[10px] px-2 py-0.5 rounded-full border font-bold shadow-sm ${getDynamicColor(guest.relationship || "אחר")}`}
                                     >
-                                      {guest.relationship}
+                                      {guest.relationship || "אחר"}
                                     </span>
                                     <span
                                       className={`w-3 h-3 rounded-full shadow-sm border border-black/10 ${guest.side === "Bride" ? "bg-pink-400" : guest.side === "Groom" ? "bg-blue-400" : "bg-purple-400"}`}
@@ -449,6 +479,101 @@ export default function SeatingPage() {
                 ))}
               </div>
             </DragDropContext>
+          </div>
+        )}
+
+        {/* מודל פרטי אורח (Pop-up) */}
+        {selectedGuest && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-300">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 text-right transform transition-all">
+              <div className="flex justify-between items-start mb-6">
+                <h3 className="text-3xl font-serif font-bold text-wedding-dark">
+                  {selectedGuest.name || selectedGuest.first_name}
+                </h3>
+                <button
+                  onClick={() => setSelectedGuest(null)}
+                  className="text-stone-400 hover:text-red-500 transition-colors p-1"
+                >
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-4 text-stone-600 mb-8 bg-wedding-beige/30 p-5 rounded-2xl border border-wedding-sand/50">
+                <p className="flex items-center gap-3">
+                  <span className="text-xl">📞</span>
+                  <strong className="text-stone-800">טלפון:</strong>
+                  <span className="font-mono text-left w-full" dir="ltr">
+                    {selectedGuest.phone || "לא הוזן"}
+                  </span>
+                </p>
+                <div className="h-px bg-wedding-sand/30 w-full"></div>
+                <p className="flex items-center gap-3">
+                  <span className="text-xl">👥</span>
+                  <strong className="text-stone-800">כמות:</strong>{" "}
+                  {selectedGuest.expectedGuests || selectedGuest.invited_count}{" "}
+                  מקומות
+                </p>
+                <div className="h-px bg-wedding-sand/30 w-full"></div>
+                <p className="flex items-center gap-3">
+                  <span className="text-xl">👰</span>
+                  <strong className="text-stone-800">צד:</strong>{" "}
+                  {selectedGuest.side === "Groom"
+                    ? "חתן"
+                    : selectedGuest.side === "Bride"
+                      ? "כלה"
+                      : "משותף"}
+                </p>
+                <div className="h-px bg-wedding-sand/30 w-full"></div>
+                <p className="flex items-center gap-3">
+                  <span className="text-xl">🤝</span>
+                  <strong className="text-stone-800">קרבה:</strong>{" "}
+                  {selectedGuest.relationship || "אחר"}
+                </p>
+                <div className="h-px bg-wedding-sand/30 w-full"></div>
+                <p className="flex items-center gap-3">
+                  <span className="text-xl">✅</span>
+                  <strong className="text-stone-800">סטטוס:</strong>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-bold ${selectedGuest.status === "Confirmed" ? "bg-green-100 text-green-700" : selectedGuest.status === "Declined" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}`}
+                  >
+                    {selectedGuest.status === "Confirmed"
+                      ? "מגיע"
+                      : selectedGuest.status === "Declined"
+                        ? "לא מגיע"
+                        : "טרם ענה"}
+                  </span>
+                </p>
+                <div className="h-px bg-wedding-sand/30 w-full"></div>
+                <p className="flex items-center gap-3">
+                  <span className="text-xl">🔥</span>
+                  <strong className="text-stone-800">קבוצת גיל:</strong>{" "}
+                  {selectedGuest.ageGroup === "YoungAdults"
+                    ? "צעיר (אבירים)"
+                    : "מבוגר (רגיל)"}
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setSelectedGuest(null)}
+                  className="w-full bg-stone-100 text-stone-800 py-3 rounded-xl hover:bg-stone-200 font-bold transition shadow-sm border border-stone-200"
+                >
+                  סגור
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
