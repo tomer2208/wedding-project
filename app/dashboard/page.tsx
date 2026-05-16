@@ -148,78 +148,59 @@ export default function DashboardPage() {
   // חישוב כל הסטטיסטיקות (אישורי הגעה + תקציב)
 
   const stats = useMemo(() => {
-    const totalGuests = guests.reduce((acc, g) => acc + g.expectedGuests, 0);
+    // פונקציית עזר קטנה שהופכת את הערך למספר בטוח ומונעת את שגיאות ה-TypeScript
+    const getGuestCount = (g: any) =>
+      Number(g.expectedGuests) || Number(g.invited_count) || 1;
+
+    const totalGuests = guests.reduce((acc, g) => acc + getGuestCount(g), 0);
 
     const confirmed = guests
-
       .filter((g) => g.status === "Confirmed")
-
-      .reduce((acc, g) => acc + g.expectedGuests, 0);
+      .reduce((acc, g) => acc + getGuestCount(g), 0);
 
     const pending = guests
-
       .filter((g) => g.status === "Pending")
-
-      .reduce((acc, g) => acc + g.expectedGuests, 0);
+      .reduce((acc, g) => acc + getGuestCount(g), 0);
 
     const declined = guests
-
       .filter((g) => g.status === "Declined")
-
-      .reduce((acc, g) => acc + g.expectedGuests, 0);
+      .reduce((acc, g) => acc + getGuestCount(g), 0);
 
     const totalExpenses = budget.reduce(
       (acc, item) => acc + (item.actual > 0 ? item.actual : item.planned),
-
       0,
     );
 
     const totalPaid = budget.reduce(
       (acc, item) => acc + (item.downpayment || 0),
-
       0,
     );
 
     const remainingToPay = totalExpenses - totalPaid;
 
     // חישוב מנה לפי כמות המאשרים (או סה"כ אם עדיין אין אישורים)
-
     const divisor =
       confirmed > 0 ? confirmed : totalGuests > 0 ? totalGuests : 1;
-
     const costPerGuest = Math.round(totalExpenses / divisor);
 
     const groomGuests = guests
-
       .filter((g) => g.side === "Groom")
-
-      .reduce((acc, g) => acc + g.expectedGuests, 0);
+      .reduce((acc, g) => acc + getGuestCount(g), 0);
 
     const brideGuests = guests
-
       .filter((g) => g.side === "Bride")
-
-      .reduce((acc, g) => acc + g.expectedGuests, 0);
+      .reduce((acc, g) => acc + getGuestCount(g), 0);
 
     return {
       totalGuests,
-
       confirmed,
-
       pending,
-
       declined,
-
       totalExpenses,
-
       totalPaid,
-
       remainingToPay,
-
       costPerGuest,
-
       groomGuests,
-
       brideGuests,
     };
   }, [guests, budget]);
