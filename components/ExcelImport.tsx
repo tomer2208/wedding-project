@@ -127,14 +127,17 @@ export const ExcelImport = ({ onImport }: ExcelImportProps) => {
 
         return {
           id: Math.random().toString(36).substr(2, 9),
+          user_id: "", // הוספנו שדה חובה ריק כדי לרצות את הטייפסקריפט
           name: String(rawName).trim(),
+          first_name: String(rawName).trim(), // שדה כפול של שם
           phone: String(rawPhone).trim(),
           expectedGuests: expectedGuests,
+          invited_count: expectedGuests, // שדה כפול של כמות
           side: side,
           relationship: relationship,
           ageGroup: ageGroup,
           status: "Pending", // <--- חזר ל-Pending לפי בקשתך!
-        };
+        } as Guest; // ההמרה הזו סוגרת את הסיפור סופית
       });
 
       onImport(mappedGuests);
