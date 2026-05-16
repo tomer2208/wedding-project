@@ -16,6 +16,7 @@ import {
   uploadGuestsFromExcel,
 } from "@/app/actions/guests";
 import { getCategories } from "@/app/actions/categories";
+import { count } from "console";
 
 const ageGroupMap: Record<string, string> = {
   Adults: "מבוגרים",
@@ -254,6 +255,8 @@ export default function GuestsPage() {
           }
 
           return {
+            id: String(Date.now() + Math.random()), // הוספנו ID זמני כדי לספק את הטייפ
+            user_id: "", // הוספנו שדה חובה ריק שימולא בשרת
             name: nameVal,
             first_name: nameVal,
             phone: phoneVal,
@@ -263,7 +266,7 @@ export default function GuestsPage() {
             relationship: relVal,
             status: statusVal,
             ageGroup: ageGroupVal,
-          };
+          } as Guest;
         });
 
         const res = await uploadGuestsFromExcel(mappedGuests);
