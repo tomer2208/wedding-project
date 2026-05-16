@@ -1,5 +1,6 @@
 "use client";
 
+import useSWR from "swr";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Guest } from "@/types/guest";
@@ -34,26 +35,26 @@ export default function SeatingPage() {
   });
 
   // משיכת האורחים וטעינת סידור השולחנות השמור בעליית העמוד
+  // שואבים נתונים עם מנגנון קאש חכם
+  const { data: guestsRes } = useSWR("guestsList", () => getGuests());
+  const { data: planRes } = useSWR("seatingPlan", () => loadSeatingPlan());
+
+  // מסנכרנים את הסטייט המקומי רק כשהנתונים זמינים
   useEffect(() => {
-    const fetchData = async () => {
-      // מביא את רשימת האורחים המעודכנת
-      const guestsRes = await getGuests();
-      if (guestsRes.success && guestsRes.guests) {
-        setGuests(guestsRes.guests as Guest[]);
-      }
+    if (guestsRes?.success && guestsRes.guests) {
+      setGuests(guestsRes.guests as Guest[]);
+    }
 
-      // מביא את הסידור השמור מהפעם הקודמת (אם קיים)
-      const planRes = await loadSeatingPlan();
-      if (planRes.success && planRes.data) {
-        setResults(planRes.data);
-      }
+    if (planRes?.success && planRes.data) {
+      setResults(planRes.data);
+    }
 
+    // אם שני הבקשות סיימו לחזור (או נשלפו מהקאש), עוצרים את חיווי הטעינה
+    if (guestsRes && planRes) {
       setIsLoadingPlan(false);
       setMounted(true);
-    };
-
-    fetchData();
-  }, []);
+    }
+  }, [guestsRes, planRes]);
 
   const handleOptimize = () => {
     setIsOptimizing(true);
